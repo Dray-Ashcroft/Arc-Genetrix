@@ -1,0 +1,3182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Recombigen — Coli-X</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --glass-bg: rgba(18, 18, 34, 0.94);
+    --glass-border: rgba(160, 130, 255, 0.3);
+    --glass-glow: rgba(150, 120, 255, 0.12);
+    --accent-purple: rgba(190, 155, 255, 0.95);
+    --accent-cyan: rgba(110, 225, 245, 0.95);
+    --text-primary: rgba(232, 228, 255, 0.98);
+    --text-secondary: rgba(200, 195, 255, 0.85);
+  }
+  body {
+    background: #05050A;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+    font-family: Roboto, 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+  #sim-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ── Branding ── */
+  .brand {
+    position: fixed;
+    top: 16px;
+    left: 20px;
+    z-index: 50;
+    pointer-events: none;
+    user-select: none;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+  }
+  .brand.hidden { opacity: 0; }
+  .brand-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--text-primary);
+    text-transform: uppercase;
+  }
+  .brand-sub {
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 5px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* ── Analysis Panel (Desktop: right sidebar) ── */
+  #analysis-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 340px;
+    height: 100vh;
+    background: var(--glass-bg);
+    border-left: 1px solid var(--glass-border);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    z-index: 20;
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: -8px 0 40px rgba(0, 0, 0, 0.5), 0 0 60px var(--glass-glow);
+  }
+  #analysis-panel.visible {
+    transform: translateX(0);
+  }
+  /* Each workflow stage (plasmid / gene / gene-cut / ligation) is its
+     own flex column inside the panel; only one is visible at a time.
+     Reuses the same gap/flow as the outer panel so .panel-actions'
+     margin-top:auto still pins actions to the stage's own bottom. */
+  .stage-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex: 1;
+    min-height: 0;
+  }
+  .stage-hidden {
+    display: none;
+  }
+
+  .panel-header {
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--accent-purple);
+    text-transform: uppercase;
+    text-shadow: 0 0 16px rgba(180, 140, 255, 0.3);
+  }
+  .panel-subtitle {
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  .panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .section-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+  }
+
+  /* DNA Sequence display */
+  .dna-sequence-container {
+    background: rgba(16, 16, 32, 0.8);
+    border: 1px solid rgba(140, 115, 220, 0.28);
+    border-radius: 10px;
+    padding: 16px 10px;
+    text-align: center;
+  }
+  /* The strand no longer wraps onto extra lines — it scrolls
+     horizontally instead, so the panel always shows exactly 2
+     sequence rows (top + bottom) no matter how long the plasmid
+     sequence is. Both rows live inside ONE scroll container so a
+     single swipe moves them together and their columns (base
+     pairs) never drift out of alignment with each other. */
+  .strand-block {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
+  /* The DNA sequence's own fixed-width coordinate system. Non-scrolling
+     itself — it only exists to anchor the scroll buttons as absolute
+     overlays, so button size/state/visibility can NEVER shift where
+     .strand-scroll (and therefore every base inside it) renders. */
+  .sequence-viewport {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .strand-labels {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 12px;
+    flex-shrink: 0;
+    padding: 2px 0;
+  }
+  .seq-direction-inline {
+    font-size: 10px;
+    color: rgba(195, 185, 240, 0.75);
+    font-family: 'Courier New', monospace;
+  }
+  .strand-scroll {
+    width: calc(100% - 52px);
+    margin: 0 26px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 2px 4px;
+    mask-image: linear-gradient(to right, transparent 0, black 10px, black calc(100% - 10px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 10px, black calc(100% - 10px), transparent 100%);
+  }
+  /* Dedicated scroll buttons, absolutely positioned overlays anchored
+     to .sequence-viewport — never flex/grid children of the sequence
+     track, so their width, padding, visibility, or :active state can
+     never affect the X-coordinate of a single base. They sit outside
+     .strand-scroll's DOM and layout flow entirely. */
+  .scroll-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--glass-border);
+    background: rgba(30, 25, 70, 0.85);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: inherit;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .scroll-btn.scroll-btn-left { left: 2px; }
+  .scroll-btn.scroll-btn-right { right: 2px; }
+  .scroll-btn:active {
+    background: rgba(60, 50, 120, 0.95);
+    transform: translateY(-50%) scale(0.9);
+  }
+  .seq-bases,
+  .seq-bases-complement {
+    display: flex;
+    flex-wrap: nowrap;
+    width: max-content;
+    gap: 3px;
+    font-family: 'Courier New', 'SF Mono', monospace;
+  }
+  .seq-bases-complement {
+    margin-top: 8px;
+    opacity: 0.9;
+  }
+  .base {
+    width: 28px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(215, 210, 255, 0.92);
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .base:hover {
+    transform: scale(1.2);
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(100, 90, 160, 0.25);
+  }
+  /* Base-pairing "rung" — a dotted connector from each top-strand base
+     down toward its complementary partner, so the two strands read as
+     one paired double helix rather than two disconnected rows of
+     letters. Purely decorative (pointer-events: none), so it can
+     never interfere with tapping the base above it. */
+  .base::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: 2px;
+    height: 4px;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(190, 170, 255, 0.95) 0px,
+      rgba(190, 170, 255, 0.95) 3px,
+      transparent 3px,
+      transparent 6px
+    );
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 2;
+  }
+  /* Ruler row — sits between the top strand and the bottom strand,
+     showing the 1-based position number every 5th base plus the
+     endpoints. Built once and never touched by the pick/unpick
+     lifecycle (unlike a label living inside a .base bubble, which
+     would be wiped whenever that bubble empties out on pick), so it
+     stays put regardless of selection state. Lets the strand double
+     as a ruler — the actual fix for "which base is this" confusion
+     that verbal position instructions alone couldn't solve. */
+  .pos-ruler {
+    position: relative;
+    height: 11px;
+    margin-top: 8px;
+  }
+  .pos-ruler .pos-tick {
+    position: absolute;
+    top: 0;
+    text-align: center;
+    font-size: 8px;
+    font-weight: 700;
+    color: rgba(160, 150, 220, 0.6);
+    font-family: 'Courier New', monospace;
+  }
+  /* A "picked" base: its letter has moved down into the selection
+     tray, so the strand bubble itself goes empty — no character —
+     until it's tapped again to put the letter back. */
+  /* A "picked" base stays visible — bright, glowing — right where it
+     is on the strand, so what's selected is legible at a glance. */
+  .base.picked {
+    color: #fff;
+    text-shadow: 0 0 8px rgba(200, 175, 255, 0.9);
+    background: rgba(180, 150, 255, 0.14);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1.5px solid rgba(180, 150, 255, 0.7);
+    box-shadow: 0 0 14px rgba(170, 140, 255, 0.55), inset 0 0 8px rgba(180, 150, 255, 0.2);
+    transform: scale(1.05);
+  }
+  .base.picked:hover {
+    transform: scale(1.1);
+    border-color: rgba(180, 140, 255, 0.9);
+    background: rgba(150, 130, 220, 0.18);
+  }
+  /* An unpicked base sitting inside the span of current picks — the
+     gap still needed to complete a contiguous run. Pulses to draw the
+     eye, since it's exactly where the next tap should land. */
+  .base.gap-needed {
+    box-shadow: inset 0 0 0 2px rgba(255, 195, 100, 0.5);
+    animation: gapPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes gapPulse {
+    0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 195, 100, 0.25); }
+    50%      { box-shadow: inset 0 0 0 2px rgba(255, 195, 100, 0.8); }
+  }
+  .base-static {
+    width: 28px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(175, 168, 225, 0.6);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .strand-caption {
+    text-align: center;
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: rgba(120, 225, 245, 0.7);
+    margin-top: 10px;
+    text-transform: uppercase;
+  }
+
+  /* Selected sequence readout */
+  .selected-readout {
+    background: rgba(16, 16, 32, 0.7);
+    border: 1px solid rgba(140, 115, 220, 0.25);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    position: relative;
+  }
+  /* Restriction enzyme docking chip — appears, "approaches," and
+     settles onto the recognition site before the cut animation runs.
+     Same visual family as .ligase-chip (Stage 3), so docking and
+     sealing read as the same kind of molecular event. */
+  .enzyme-chip {
+    position: absolute;
+    left: 50%;
+    top: -14px;
+    transform: translate(-50%, -100%);
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: rgba(30, 25, 70, 0.92);
+    border: 1px solid rgba(180, 140, 255, 0.55);
+    color: rgba(215, 200, 255, 0.95);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.5s ease, top 0.7s cubic-bezier(0.34, 1.2, 0.64, 1);
+  }
+  .enzyme-chip.approaching {
+    opacity: 1;
+    top: -32px;
+  }
+  .enzyme-chip.docked {
+    opacity: 1;
+    top: -14px;
+  }
+  /* The readout letters split into a paired (left) group and an
+     overhang (right) group, moving apart to visibly expose the cut —
+     the same paired/overhang color language already used in the
+     insertion-stage molecule strips. */
+  .cut-split-group {
+    display: inline-block;
+    font-family: 'Courier New', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    transition: transform 0.75s cubic-bezier(0.3, 0.9, 0.4, 1);
+  }
+  .cut-split-left {
+    color: rgba(215, 210, 255, 0.9);
+  }
+  .cut-split-right {
+    color: var(--accent-cyan);
+    text-shadow: 0 0 8px rgba(100, 220, 240, 0.5);
+  }
+  .cut-split-group.split-left {
+    transform: translateX(-16px);
+  }
+  .cut-split-group.split-right {
+    transform: translateX(16px);
+  }
+  .readout-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .readout-seq {
+    font-family: 'Courier New', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 4px;
+    min-height: 24px;
+  }
+  .readout-seq .empty-slot {
+    color: rgba(160, 150, 220, 0.5);
+  }
+
+  /* Status / Result */
+  .status-area {
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    transform: translateY(4px);
+  }
+  .status-area.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .status-success {
+    background: rgba(30, 70, 45, 0.5);
+    border: 1px solid rgba(120, 255, 160, 0.3);
+    color: rgba(140, 255, 180, 0.95);
+    text-shadow: 0 0 12px rgba(120, 255, 160, 0.3);
+  }
+  .status-error {
+    background: rgba(70, 30, 30, 0.4);
+    border: 1px solid rgba(255, 120, 120, 0.25);
+    color: rgba(255, 140, 140, 0.9);
+    text-shadow: 0 0 12px rgba(255, 120, 120, 0.2);
+  }
+  /* Distinct from .status-success on purpose: identifying a site (green)
+     and actually cutting it (cyan) are two different steps. */
+  .status-cut {
+    background: rgba(15, 55, 65, 0.55);
+    border: 1px solid rgba(100, 220, 240, 0.35);
+    color: rgba(150, 230, 245, 0.95);
+    text-shadow: 0 0 12px rgba(100, 220, 240, 0.3);
+  }
+  /* Fixed-width letter/gap grid for the cut-result lines. Every gap
+     between letters reserves the SAME width whether or not it holds
+     the cut arrow — so the arrow sitting at a different gap position
+     on the top line vs the bottom line can never shift the DNA
+     letters out of column alignment between the two strands. */
+  .cut-line {
+    display: inline-flex;
+    align-items: center;
+    font-family: 'Courier New', 'SF Mono', monospace;
+    vertical-align: middle;
+  }
+  .cut-line .cut-letter {
+    display: inline-block;
+    width: 13px;
+    text-align: center;
+  }
+  .cut-line .cut-gap {
+    display: inline-block;
+    width: 11px;
+    text-align: center;
+    color: var(--accent-cyan);
+    font-weight: 700;
+  }
+
+  /* Action buttons */
+  .panel-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: auto;
+  }
+  .panel-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    background: rgba(30, 25, 70, 0.8);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: all 0.18s ease;
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .panel-btn:hover {
+    background: rgba(50, 45, 100, 0.9);
+    box-shadow: 0 0 20px var(--glass-glow);
+    transform: translateY(-1px);
+  }
+  .panel-btn:active { transform: scale(0.96); }
+  .panel-btn.primary {
+    border-color: rgba(120, 255, 160, 0.4);
+    color: rgba(200, 255, 220, 0.95);
+    background: rgba(25, 60, 40, 0.8);
+  }
+  .panel-btn.primary:hover {
+    background: rgba(35, 80, 55, 0.9);
+    box-shadow: 0 0 24px rgba(120, 255, 160, 0.25);
+  }
+  .panel-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+  /* "Move to next stage" buttons — cyan, distinct from the green
+     .primary (site-identified/action) language, and from the plain
+     Reset button. Ties into the same cyan used for .status-cut and
+     the plasmid glow, so "cut" and "advance" read as one family. */
+  .panel-btn.forward {
+    border-color: rgba(100, 220, 240, 0.4);
+    color: rgba(180, 240, 250, 0.95);
+    background: rgba(15, 55, 65, 0.8);
+  }
+  .panel-btn.forward:hover {
+    background: rgba(20, 70, 82, 0.9);
+    box-shadow: 0 0 24px rgba(100, 220, 240, 0.25);
+  }
+
+  /* Plasmid-cut reference card, shown during the Gene-of-Interest
+     stage so the student can see what they're matching against
+     without leaving the gene sequence. Generated dynamically from
+     appState.plasmidCut — never a hard-coded enzyme. */
+  .reference-card {
+    background: rgba(16, 16, 32, 0.8);
+    border: 1px solid rgba(100, 220, 240, 0.3);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+  }
+  .reference-enzyme {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent-cyan);
+    margin-bottom: 8px;
+  }
+  .reference-cut-lines {
+    font-family: 'Courier New', 'SF Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+    line-height: 1.6;
+  }
+  .reference-overhang {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(100, 220, 240, 0.25);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: rgba(150, 230, 245, 0.8);
+    text-transform: uppercase;
+  }
+  .reference-overhang strong {
+    display: block;
+    font-family: 'Courier New', monospace;
+    font-size: 16px;
+    letter-spacing: 4px;
+    color: var(--accent-cyan);
+    margin-bottom: 4px;
+  }
+
+  /* Side-by-side sticky-end comparison after the gene is cut. */
+  .compare-grid {
+    display: flex;
+    gap: 10px;
+  }
+  .compare-card {
+    flex: 1;
+    background: rgba(16, 16, 32, 0.8);
+    border: 1px solid rgba(100, 220, 240, 0.3);
+    border-radius: 10px;
+    padding: 12px 6px;
+    text-align: center;
+  }
+  .compare-card .compare-label {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .compare-card .compare-seq {
+    font-family: 'Courier New', monospace;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 10px rgba(100, 220, 240, 0.4);
+  }
+
+  /* ── Insertion / annealing / ligation visual ── */
+  /* Real DNA-letter strips instead of abstract shapes — the paired
+     (double-stranded) portion of each end and the overhang (single-
+     stranded) portion are visually distinct, and nick markers sit
+     inline at the actual junction position rather than floating near
+     a generic circle. All letters come from computeCutDisplay(), split
+     at the cut arrow — never invented. */
+  .molecule-strip {
+    font-family: 'Courier New', 'SF Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-align: center;
+    background: rgba(16, 16, 32, 0.7);
+    border: 1px solid rgba(140, 115, 220, 0.25);
+    border-radius: 10px;
+    padding: 12px 8px;
+    overflow-x: auto;
+    white-space: nowrap;
+    position: relative;
+    transition: border-color 0.5s ease, box-shadow 0.6s ease;
+  }
+  .molecule-strip.sealed-glow {
+    border-color: rgba(120, 220, 240, 0.6);
+    box-shadow: 0 0 26px rgba(120, 220, 240, 0.3);
+  }
+  .strip-line {
+    line-height: 1.9;
+  }
+  .strip-line .body-ellipsis {
+    color: rgba(150, 140, 200, 0.4);
+    font-size: 10px;
+  }
+  /* Only shown once the backbone is fully sealed — a real closed
+     circular plasmid has no free 5'/3' end, it just loops back on
+     itself, so this replaces the linear end-labels at that point. */
+  .strip-line .loop-icon {
+    color: rgba(120, 220, 240, 0.7);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .strip-line .paired {
+    color: rgba(215, 210, 255, 0.85);
+  }
+  .strip-line .overhang {
+    color: var(--accent-cyan);
+    font-weight: 700;
+    text-shadow: 0 0 6px rgba(100, 220, 240, 0.35);
+  }
+  .strip-label {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(160, 150, 220, 0.55);
+    text-transform: uppercase;
+    text-align: center;
+    margin: 12px 0 6px;
+  }
+  /* Sticky-end step diagrams: a literal notched outline of the two
+     strands, so the overhang reads as a physical shape (a step) —
+     not just a color difference in a line of letters. */
+  .sticky-diagram-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 0 8px;
+  }
+  /* Shown only for blunt-cutting enzymes (HindII), right next to the
+     step diagrams, since a flush bar with no notch could otherwise
+     read as a missing feature rather than the correct representation
+     of "no overhang exists here." */
+  .blunt-note {
+    flex-basis: 100%;
+    text-align: center;
+    font-size: 8px;
+    letter-spacing: 0.5px;
+    color: rgba(160, 150, 220, 0.55);
+    margin-top: 2px;
+  }
+  .sticky-diagram-row svg {
+    display: block;
+  }
+  .sticky-diagram-row .step-caption {
+    font-size: 7px;
+    letter-spacing: 1px;
+    fill: rgba(160, 150, 220, 0.6);
+    text-transform: uppercase;
+  }
+  .open-gap {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: rgba(255, 180, 100, 0.75);
+    margin: 0 4px;
+    vertical-align: middle;
+  }
+  .nick-inline {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255, 180, 100, 0.9);
+    box-shadow: 0 0 8px rgba(255, 180, 100, 0.6);
+    vertical-align: middle;
+    margin: 0 3px;
+    transition: opacity 0.4s ease, transform 0.4s ease, width 0.4s ease, margin 0.4s ease;
+  }
+  .nick-inline.sealed {
+    opacity: 0;
+    width: 0;
+    margin: 0;
+    transform: scale(0);
+  }
+  .ligase-chip {
+    position: absolute;
+    top: -2px;
+    padding: 3px 9px;
+    border-radius: 10px;
+    background: rgba(25, 60, 45, 0.92);
+    border: 1px solid rgba(120, 255, 160, 0.55);
+    color: rgba(165, 255, 195, 0.95);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    z-index: 5;
+    transform: translate(-50%, -100%);
+    transition: left 1.1s ease, opacity 0.4s ease;
+  }
+
+  /* ── Mobile Bottom Sheet ── */
+  @media (max-width: 768px) {
+    #analysis-panel {
+      width: 100%;
+      height: auto;
+      max-height: 65vh;
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      border-left: none;
+      border-top: 1px solid var(--glass-border);
+      border-radius: 20px 20px 0 0;
+      transform: translateY(100%);
+      padding: 20px 20px 32px;
+      overflow-y: auto;
+    }
+    #analysis-panel.visible {
+      transform: translateY(0);
+    }
+    .base {
+      width: 32px;
+      height: 40px;
+      font-size: 17px;
+    }
+    .base-static {
+      width: 32px;
+      height: 26px;
+      font-size: 15px;
+    }
+  }
+
+  /* ── Hint Overlay ── */
+  #hint-overlay {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    padding: 10px 24px;
+    background: rgba(12, 12, 24, 0.9);
+    border: 1px solid rgba(150, 120, 255, 0.25);
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: 15;
+    text-align: center;
+    white-space: nowrap;
+  }
+  #hint-overlay.visible {
+    opacity: 1;
+  }
+</style>
+</head>
+<body>
+<div id="sim-container">
+  <canvas id="bioCanvas"></canvas>
+
+  <div class="brand" id="brand">
+    <div class="brand-title">Recombigen</div>
+    <div class="brand-sub">Coli-X</div>
+  </div>
+
+  <div id="hint-overlay">Tap the glowing plasmid to analyze its DNA</div>
+
+  <div id="analysis-panel">
+    <div class="panel-header">
+      <div class="panel-title" id="panel-title">Plasmid Analysis</div>
+      <div class="panel-subtitle" id="panel-subtitle">Restriction Site Identification</div>
+    </div>
+
+    <!-- STAGE 1: identify + cut the plasmid (existing, unchanged) -->
+    <div class="stage-panel" id="stage-plasmid">
+      <div class="panel-section">
+        <div class="section-label">DNA Sequence — tap any 6 consecutive bases</div>
+        <div class="dna-sequence-container">
+          <div class="strand-block">
+            <div class="strand-labels">
+              <span class="seq-direction-inline">5'</span>
+              <span class="seq-direction-inline">3'</span>
+            </div>
+            <div class="sequence-viewport">
+              <div class="strand-scroll" id="strand-scroll">
+                <div class="seq-bases" id="seq-bases"></div>
+                <div class="pos-ruler" id="pos-ruler"></div>
+                <div class="seq-bases-complement" id="seq-bases-complement"></div>
+              </div>
+              <button class="scroll-btn scroll-btn-left" id="scroll-left" type="button" aria-label="Scroll left">‹</button>
+              <button class="scroll-btn scroll-btn-right" id="scroll-right" type="button" aria-label="Scroll right">›</button>
+            </div>
+            <div class="strand-labels">
+              <span class="seq-direction-inline">3'</span>
+              <span class="seq-direction-inline">5'</span>
+            </div>
+          </div>
+          <div class="strand-caption">Top strand only is selectable · swipe to scroll</div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Selected Sequence</div>
+        <div class="selected-readout">
+          <div class="enzyme-chip" id="plasmid-enzyme-chip"></div>
+          <div class="readout-label">Selected region (5'→3')</div>
+          <div class="readout-seq" id="readout-seq">
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Analysis</div>
+        <div class="status-area" id="status-area"></div>
+      </div>
+
+      <div class="panel-actions">
+        <button class="panel-btn" id="btn-reset">Reset</button>
+        <button class="panel-btn primary" id="btn-restrict" disabled>Restrict</button>
+      </div>
+      <div class="panel-actions" id="plasmid-next-row" style="display:none;">
+        <button class="panel-btn forward" id="btn-go-to-gene">Cut Gene of Interest →</button>
+      </div>
+    </div>
+
+    <!-- STAGE 2: find the SAME site in the Gene of Interest -->
+    <div class="stage-panel stage-hidden" id="stage-gene">
+      <div class="panel-section">
+        <div class="section-label">Plasmid — Previous Cut</div>
+        <div class="reference-card" id="plasmid-reference-card"></div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Gene of Interest</div>
+        <div style="font-size:10px; color:var(--text-secondary); margin-bottom:2px;">Find the same restriction site used to cut the plasmid</div>
+        <div class="dna-sequence-container">
+          <div class="strand-block">
+            <div class="strand-labels">
+              <span class="seq-direction-inline">5'</span>
+              <span class="seq-direction-inline">3'</span>
+            </div>
+            <div class="sequence-viewport">
+              <div class="strand-scroll" id="strand-scroll-gene">
+                <div class="seq-bases" id="seq-bases-gene"></div>
+                <div class="pos-ruler" id="pos-ruler-gene"></div>
+                <div class="seq-bases-complement" id="seq-bases-complement-gene"></div>
+              </div>
+              <button class="scroll-btn scroll-btn-left" id="scroll-left-gene" type="button" aria-label="Scroll left">‹</button>
+              <button class="scroll-btn scroll-btn-right" id="scroll-right-gene" type="button" aria-label="Scroll right">›</button>
+            </div>
+            <div class="strand-labels">
+              <span class="seq-direction-inline">3'</span>
+              <span class="seq-direction-inline">5'</span>
+            </div>
+          </div>
+          <div class="strand-caption">Top strand only is selectable · swipe to scroll</div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Selected Sequence</div>
+        <div class="selected-readout">
+          <div class="enzyme-chip" id="gene-enzyme-chip"></div>
+          <div class="readout-label">Selected region (5'→3')</div>
+          <div class="readout-seq" id="readout-seq-gene">
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+            <span class="empty-slot">_</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Analysis</div>
+        <div class="status-area" id="status-area-gene"></div>
+      </div>
+
+      <div class="panel-actions">
+        <button class="panel-btn" id="btn-reset-gene">Reset</button>
+        <button class="panel-btn primary" id="btn-cut-gene" disabled>Cut Gene</button>
+      </div>
+    </div>
+
+    <!-- STAGE 3: gene cut result + sticky-end comparison -->
+    <div class="stage-panel stage-hidden" id="stage-gene-cut">
+      <div class="panel-section">
+        <div class="section-label">Analysis</div>
+        <div class="status-area" id="status-area-gene-cut"></div>
+      </div>
+
+      <div class="panel-section" id="compare-section" style="display:none;">
+        <div class="section-label">Sticky End Comparison</div>
+        <div class="compare-grid">
+          <div class="compare-card">
+            <div class="compare-label">Plasmid End</div>
+            <div class="compare-seq" id="compare-plasmid-end"></div>
+          </div>
+          <div class="compare-card">
+            <div class="compare-label">Gene of Interest End</div>
+            <div class="compare-seq" id="compare-gene-end"></div>
+          </div>
+        </div>
+        <div class="status-area" id="compatible-status" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="panel-actions">
+        <button class="panel-btn forward" id="btn-proceed-ligation" disabled>Proceed to Ligation →</button>
+      </div>
+    </div>
+
+    <!-- STAGE 4: insertion → sticky-end annealing → simulated ligation -->
+    <div class="stage-panel stage-hidden" id="stage-ligation">
+      <div class="panel-section" id="pre-insert-section">
+        <div class="section-label">Cut Plasmid — Open at the Restriction Site</div>
+        <div class="sticky-diagram-row" id="plasmid-sticky-diagram"></div>
+        <div class="molecule-strip">
+          <div class="strip-line" id="plasmid-strand-top"></div>
+          <div class="strip-line" id="plasmid-strand-bottom"></div>
+        </div>
+        <div class="strip-label">Gene of Interest — Cut With the Same Enzyme</div>
+        <div class="sticky-diagram-row" id="gene-sticky-diagram"></div>
+        <div class="molecule-strip">
+          <div class="strip-line" id="gene-strand-top"></div>
+          <div class="strip-line" id="gene-strand-bottom"></div>
+        </div>
+      </div>
+
+      <div class="panel-section stage-hidden" id="junction-section">
+        <div class="section-label" id="junction-label">Recombinant Junction</div>
+        <div class="sticky-diagram-row" id="junction-sticky-diagram"></div>
+        <div class="molecule-strip" id="junction-strip">
+          <div class="strip-line" id="junction-strand-top"></div>
+          <div class="strip-line" id="junction-strand-bottom"></div>
+          <div class="ligase-chip" id="ligase-chip" style="display:none;">LIGASE</div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="status-area" id="ligation-status"></div>
+      </div>
+
+      <div class="panel-actions" id="insert-action-row">
+        <button class="panel-btn forward" id="btn-insert-gene">Insert Gene of Interest</button>
+      </div>
+      <div class="panel-actions stage-hidden" id="ligate-action-row">
+        <button class="panel-btn forward" id="btn-simulate-ligation">Simulate Ligation</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  /* ============================================================
+     CONFIG
+     ============================================================ */
+  const canvas = document.getElementById('bioCanvas');
+  const ctx = canvas.getContext('2d');
+
+  let W, H, CX, CY;
+  const dishRadius = 220;
+  const dishInnerRadius = 200;
+  const bacteriaCount = 20;
+  const particleCount = 60;
+
+  /* ============================================================
+     RECOGNITION-SITE SYSTEM (redesigned)
+     ------------------------------------------------------------
+     Earlier versions forced the student toward one hard-coded
+     6-base "correct answer," which is not how restriction mapping
+     actually works and is what made the exercise feel arbitrary.
+     Real students should be free to select ANY 6 consecutive
+     top-strand bases; the tool then checks that window against the
+     real recognition sequences of EcoRI, BamHI, and HindII (as per
+     the NCERT Class XII reference chart) and reports whichever
+     enzyme, if any, would cut there. HindII's site is degenerate
+     (Y = C or T, R = A or G), so matching uses IUPAC codes rather
+     than a literal string comparison.
+
+     The complementary (bottom) strand is derived automatically for
+     biological accuracy but is never selectable — no pointer
+     listeners are ever attached to it, so bases from different
+     strands can never be combined into one selection.
+     ============================================================ */
+  const IUPAC = { A: 'A', T: 'T', G: 'G', C: 'C', R: 'AG', Y: 'CT', N: 'ATGC' };
+
+  function complementOf(seq) {
+    const map = { A: 'T', T: 'A', G: 'C', C: 'G', R: 'Y', Y: 'R', N: 'N' };
+    return seq.split('').map(b => map[b] || 'N').join('');
+  }
+
+  function matchesPattern(fragment, pattern) {
+    if (fragment.length !== pattern.length) return false;
+    for (let i = 0; i < pattern.length; i++) {
+      const allowed = IUPAC[pattern[i]] || pattern[i];
+      if (!allowed.includes(fragment[i])) return false;
+    }
+    return true;
+  }
+
+  // cutAfter = how many bases (on the TOP strand, left to right) sit
+  // before the cut. The bottom-strand cut mirrors it automatically
+  // because every recognition site here is palindromic:
+  // bottomCutAfter = pattern.length - cutAfter.
+  const ENZYMES = [
+    { name: 'EcoRI',  pattern: 'GAATTC', source: 'Escherichia coli strain RY13',        cutAfter: 1, endType: 'sticky' },
+    { name: 'BamHI',  pattern: 'GGATCC', source: 'Bacillus amyloliquefaciens strain H', cutAfter: 1, endType: 'sticky' },
+    { name: 'HindII', pattern: 'GTYRAC', source: 'Haemophilus influenzae strain Rd',    cutAfter: 3, endType: 'blunt'  },
+  ];
+
+  function findMatchingEnzyme(fragment) {
+    return ENZYMES.find(e => matchesPattern(fragment, e.pattern)) || null;
+  }
+
+  // Positions strictly between the current picks' min and max that
+  // AREN'T picked yet — i.e. the gap(s) still needed to complete a
+  // contiguous run. The span-based selection rule (see onBaseClick)
+  // deliberately allows tapping bases in any order, which means a
+  // legitimate in-progress selection can have a temporary gap — e.g.
+  // both ends of a site tapped before the middle. An earlier version
+  // of this helper ("findStrayIndices") flagged exactly those
+  // legitimate picks as if they were mistakes; this replaces that with
+  // something actually useful: pointing at what still needs a tap,
+  // never accusing a correct pick of being wrong. Pure function, no
+  // side effects, shared by both stages' UI updates.
+  function findGapIndices(selectedBases) {
+    const indices = selectedBases.map(s => s.index);
+    if (indices.length < 2) return new Set();
+    const minIdx = Math.min(...indices);
+    const maxIdx = Math.max(...indices);
+    const picked = new Set(indices);
+    const gaps = new Set();
+    for (let i = minIdx; i <= maxIdx; i++) {
+      if (!picked.has(i)) gaps.add(i);
+    }
+    return gaps;
+  }
+
+  // Single source of truth for "what does this enzyme's cut look like."
+  // Used by the plasmid Restrict result, the Gene-of-Interest reference
+  // card, and the gene cut result — so all three can never disagree
+  // about the same enzyme's cut pattern or overhang.
+  // Renders a strand's letters as a fixed-width grid with the cut
+  // arrow inserted at its own reserved gap-slot — never as inline
+  // text sharing the letters' natural flow. Because every gap between
+  // letters is the same width whether or not it holds the arrow, the
+  // top line's arrow (at its own cut position) and the bottom line's
+  // arrow (at a DIFFERENT cut position, in general) can never drag
+  // the surrounding letters out of column alignment with each other.
+  function buildCutLineHtml(letters, cutAfter, arrowChar) {
+    const gapIndex = cutAfter - 1;
+    let html = '';
+    for (let i = 0; i < letters.length; i++) {
+      html += `<span class="cut-letter">${letters[i]}</span>`;
+      if (i < letters.length - 1) {
+        html += `<span class="cut-gap">${i === gapIndex ? arrowChar : ''}</span>`;
+      }
+    }
+    return `<span class="cut-line">${html}</span>`;
+  }
+
+  function computeCutDisplay(enzyme) {
+    const pattern = enzyme.pattern;
+    const cutAfter = enzyme.cutAfter;
+    const bottomPattern = complementOf(pattern);       // 3'→5', aligned under the top strand
+    const bottomCutAfter = pattern.length - cutAfter;  // mirrored, since every site here is palindromic
+    const overhang = pattern.slice(cutAfter, pattern.length - cutAfter); // '' for blunt enzymes
+    const topCut = `${pattern.slice(0, cutAfter)}\u2193${pattern.slice(cutAfter)}`;
+    const bottomCut = `${bottomPattern.slice(0, bottomCutAfter)}\u2191${bottomPattern.slice(bottomCutAfter)}`;
+    const endLabel = enzyme.endType === 'blunt'
+      ? 'Blunt end — no overhang'
+      : `Sticky end — 5' overhang (${overhang})`;
+    return { pattern, bottomPattern, cutAfter, bottomCutAfter, overhang, topCut, bottomCut, endLabel };
+  }
+
+  // Top strand, 5'→3': contains one real site for each of the three
+  // enzymes above (GAATTC, GGATCC, GTTAAC — the last one satisfies
+  // HindII's GTYRAC pattern), plus filler bases so the sites aren't
+  // simply adjacent. Every base has a unique index, 0..25.
+  const PLASMID = { seq: 'ATGAATTCTAGGATCCCGGTTAACTA' };
+  PLASMID.complement = complementOf(PLASMID.seq); // bottom strand, 3'→5', aligned under the top strand
+
+  const PLASMID_TEMPLATES = [PLASMID];
+
+  // Gene-of-Interest DNA — a separate fragment the student must cut
+  // with the SAME enzyme used on the plasmid, to produce a compatible
+  // sticky end. One concrete template per enzyme (HindII's is a real
+  // instantiation of its degenerate GTYRAC pattern), each with its
+  // recognition site placed near a flank rather than in the middle of
+  // the "gene," so the gene itself stays conceptually intact after
+  // cutting. Looked up by enzyme name — never hard-coded to one enzyme.
+  //
+  // The prefix deliberately ends in "A", not "G": every one of these
+  // enzymes' sites starts with G, and an earlier version's prefix also
+  // ended in G, so the site's real leading G sat right next to a
+  // look-alike decoy G. A selection could spell the right 6 letters
+  // while actually starting one base too early (skipping the true
+  // site's first base) — right letters, wrong (non-consecutive)
+  // positions. Ending the prefix in A removes that trap entirely.
+  const GENE_TEMPLATES = {
+    EcoRI:  'ATCTAGAATTCTGACCGT',  // GAATTC at indices 5–10
+    BamHI:  'ATCTAGGATCCTGACCGT',  // GGATCC at indices 5–10
+    HindII: 'ATCTAGTTAACTGACCGT',  // GTTAAC at indices 5–10 (satisfies GTYRAC)
+  };
+
+  function getGeneSequence(enzymeName) {
+    const seq = GENE_TEMPLATES[enzymeName];
+    return { seq, complement: complementOf(seq) };
+  }
+
+  /* ============================================================
+     STATE
+     ============================================================ */
+  const appState = {
+    mode: 'IDLE',   // IDLE | CELL_SELECTED | PLASMID_ANALYSIS | SUCCESS | PLASMID_CUT | GENE_ANALYSIS | GENE_CUT | READY_FOR_INSERTION | STICKY_ENDS_ANNEALED | LIGATION_IN_PROGRESS | LIGATION_COMPLETE
+    selectedIndex: -1,
+    hoverIndex: -1,
+    mouseX: 0, mouseY: 0,
+    cellZoom: 0,     // 0→1 transition
+    panelOpen: false,
+    selectedBases: [], // array of {index, base}, in selection order
+    matchedEnzyme: null, // set by validateSelection() when the current selection is a real site
+    plasmidCut: null,        // set once the plasmid is actually cut — { enzyme, recognitionSite, cutAfter, endType, overhang, source }
+    geneSelectedBases: [],   // gene-stage equivalent of selectedBases
+    geneMatchedEnzyme: null, // gene-stage equivalent of matchedEnzyme
+    geneCut: null,           // set once the gene is actually cut, mirrors plasmidCut
+    ligationRunId: 0,        // bumped whenever the ligation animation is (re)started or aborted, so stray setTimeout callbacks from a superseded run can recognize themselves as stale and no-op
+    cutAnimRunId: 0,         // same pattern, for the restriction-cutting docking/split animation (plasmid and gene stages both use this)
+  };
+
+  const camera = { x: 0, y: 0, scale: 1, targetX: 0, targetY: 0, targetScale: 1 };
+
+  const bacteria = [];
+  const ambientParticles = [];
+
+  /* ============================================================
+     DOM REFS
+     ============================================================ */
+  const brand        = document.getElementById('brand');
+  const hintOverlay  = document.getElementById('hint-overlay');
+  const panel        = document.getElementById('analysis-panel');
+  const panelTitle   = document.getElementById('panel-title');
+  const panelSubtitle = document.getElementById('panel-subtitle');
+  const seqBasesEl   = document.getElementById('seq-bases');
+  const posRulerEl   = document.getElementById('pos-ruler');
+  const seqBasesComplementEl = document.getElementById('seq-bases-complement');
+  const strandScrollEl = document.getElementById('strand-scroll');
+  const scrollLeftBtn  = document.getElementById('scroll-left');
+  const scrollRightBtn = document.getElementById('scroll-right');
+  const readoutEl    = document.getElementById('readout-seq');
+  const plasmidEnzymeChip = document.getElementById('plasmid-enzyme-chip');
+  const statusArea   = document.getElementById('status-area');
+  const btnReset     = document.getElementById('btn-reset');
+  const btnRestrict  = document.getElementById('btn-restrict');
+
+  // Stage containers
+  const stagePlasmid  = document.getElementById('stage-plasmid');
+  const stageGene     = document.getElementById('stage-gene');
+  const stageGeneCut  = document.getElementById('stage-gene-cut');
+  const stageLigation = document.getElementById('stage-ligation');
+  const STAGES = { stagePlasmid, stageGene, stageGeneCut, stageLigation };
+
+  // Stage 1 extra: the "move on" row, shown only after a successful cut
+  const plasmidNextRow = document.getElementById('plasmid-next-row');
+  const btnGoToGene    = document.getElementById('btn-go-to-gene');
+
+  // Stage 2 (Gene of Interest analysis)
+  const referenceCard        = document.getElementById('plasmid-reference-card');
+  const seqBasesGeneEl       = document.getElementById('seq-bases-gene');
+  const posRulerGeneEl       = document.getElementById('pos-ruler-gene');
+  const seqBasesComplementGeneEl = document.getElementById('seq-bases-complement-gene');
+  const strandScrollGeneEl   = document.getElementById('strand-scroll-gene');
+  const scrollLeftGeneBtn    = document.getElementById('scroll-left-gene');
+  const scrollRightGeneBtn   = document.getElementById('scroll-right-gene');
+  const readoutGeneEl        = document.getElementById('readout-seq-gene');
+  const geneEnzymeChip       = document.getElementById('gene-enzyme-chip');
+  const statusAreaGene       = document.getElementById('status-area-gene');
+  const btnResetGene         = document.getElementById('btn-reset-gene');
+  const btnCutGene           = document.getElementById('btn-cut-gene');
+
+  // Stage 3 (Gene cut + comparison)
+  const statusAreaGeneCut  = document.getElementById('status-area-gene-cut');
+  const compareSection     = document.getElementById('compare-section');
+  const comparePlasmidEnd  = document.getElementById('compare-plasmid-end');
+  const compareGeneEnd     = document.getElementById('compare-gene-end');
+  const compatibleStatus   = document.getElementById('compatible-status');
+  const btnProceedLigation = document.getElementById('btn-proceed-ligation');
+
+  // Stage 4 (insertion → annealing → ligation)
+  const preInsertSection   = document.getElementById('pre-insert-section');
+  const plasmidStickyDiagram = document.getElementById('plasmid-sticky-diagram');
+  const geneStickyDiagram    = document.getElementById('gene-sticky-diagram');
+  const junctionStickyDiagram = document.getElementById('junction-sticky-diagram');
+  const plasmidStrandTop   = document.getElementById('plasmid-strand-top');
+  const plasmidStrandBottom = document.getElementById('plasmid-strand-bottom');
+  const geneStrandTop      = document.getElementById('gene-strand-top');
+  const geneStrandBottom   = document.getElementById('gene-strand-bottom');
+  const junctionSection    = document.getElementById('junction-section');
+  const junctionLabel      = document.getElementById('junction-label');
+  const junctionStrip      = document.getElementById('junction-strip');
+  const junctionStrandTop  = document.getElementById('junction-strand-top');
+  const junctionStrandBottom = document.getElementById('junction-strand-bottom');
+  const ligaseChip         = document.getElementById('ligase-chip');
+  const insertActionRow    = document.getElementById('insert-action-row');
+  const ligateActionRow    = document.getElementById('ligate-action-row');
+  const btnInsertGene      = document.getElementById('btn-insert-gene');
+  const btnSimulateLigation = document.getElementById('btn-simulate-ligation');
+  const ligationStatus = document.getElementById('ligation-status');
+
+  // Left/right scroll buttons — a swipe directly on the DNA strand was
+  // landing on a base and registering as a mistouch/selection. These
+  // buttons live outside .strand-scroll entirely, so scrolling never
+  // touches the selectable bases at all.
+  function wireScrollButtons(scrollEl, leftBtn, rightBtn) {
+    const STEP = 130; // roughly 4 bases
+    leftBtn.addEventListener('pointerdown', e => {
+      e.stopPropagation(); e.preventDefault();
+      scrollEl.scrollBy({ left: -STEP, behavior: 'smooth' });
+    });
+    rightBtn.addEventListener('pointerdown', e => {
+      e.stopPropagation(); e.preventDefault();
+      scrollEl.scrollBy({ left: STEP, behavior: 'smooth' });
+    });
+  }
+  wireScrollButtons(strandScrollEl, scrollLeftBtn, scrollRightBtn);
+  wireScrollButtons(strandScrollGeneEl, scrollLeftGeneBtn, scrollRightGeneBtn);
+
+  /* ============================================================
+     UTILITIES
+     ============================================================ */
+  function resize() {
+    const container = document.getElementById('sim-container');
+    W = container.clientWidth;
+    H = container.clientHeight;
+    canvas.width = W * window.devicePixelRatio;
+    canvas.height = H * window.devicePixelRatio;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    CX = W / 2;
+    CY = H / 2;
+    if (appState.selectedIndex < 0) {
+      camera.targetX = CX; camera.x = CX;
+      camera.targetY = CY; camera.y = CY;
+    }
+  }
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function worldToScreen(wx, wy) {
+    return { x: (wx - camera.x) * camera.scale + CX, y: (wy - camera.y) * camera.scale + CY };
+  }
+
+  function screenToWorld(sx, sy) {
+    return { x: (sx - CX) / camera.scale + camera.x, y: (sy - CY) / camera.scale + camera.y };
+  }
+
+  /* ============================================================
+     INITIALISATION
+     ============================================================ */
+  function initBacteria() {
+    bacteria.length = 0;
+    for (let i = 0; i < bacteriaCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * (dishInnerRadius - 50);
+      const tmpl = PLASMID_TEMPLATES[Math.floor(Math.random() * PLASMID_TEMPLATES.length)];
+      bacteria.push({
+        x: CX + Math.cos(angle) * dist,
+        y: CY + Math.sin(angle) * dist,
+        angle: Math.random() * Math.PI * 2,
+        length: rand(18, 32),
+        width: rand(6, 10),
+        vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3),
+        va: rand(-0.015, 0.015),
+        glowPhase: Math.random() * Math.PI * 2,
+        glowSpeed: rand(0.02, 0.05),
+        hue: rand(260, 290),
+        opacity: rand(0.7, 0.95),
+        trail: [],
+        plasmid: { ...tmpl },
+        plasmidPhase: Math.random() * Math.PI * 2,
+        // Stable seeds for the magnified-view nucleoid (fixed once at
+        // spawn, not re-rolled per frame, so the irregular shape holds
+        // still instead of jittering every animation frame).
+        nucleoidSeed: Array.from({ length: 11 }, () => rand(0.72, 1.28)),
+        nucleoidClumps: Array.from({ length: 4 }, () => ({
+          a: Math.random() * Math.PI * 2,
+          r: rand(0.25, 0.65),
+          size: rand(0.12, 0.22),
+        })),
+        cytoTexture: Array.from({ length: 14 }, () => ({
+          x: rand(-0.42, 0.42),
+          y: rand(-0.42, 0.42),
+          size: rand(0.6, 1.8),
+          o: rand(0.05, 0.16),
+        })),
+        // Individual chromosome fibers for the nucleoid — each with its
+        // OWN random orientation (not all parallel), so fibers cross
+        // each other at many angles like a real tangled/supercoiled
+        // mass rather than a stack of parallel waves.
+        nucleoidFibers: Array.from({ length: 26 }, () => ({
+          a0: Math.random() * Math.PI * 2,   // starting angular position within the nucleoid
+          r0: rand(0.04, 0.5),               // starting distance from center (fraction)
+          dir: Math.random() * Math.PI * 2,  // this fiber's own travel direction — independent per fiber
+          len: rand(0.3, 0.95),
+          curve1: rand(-0.7, 0.7),
+          curve2: rand(-0.7, 0.7),
+          loopy: Math.random() < 0.45,
+          loopA: Math.random() * Math.PI * 2,
+          loopR: rand(0.05, 0.13),
+          width: rand(0.4, 1.1),
+          op: rand(0.16, 0.4),
+        })),
+      });
+    }
+  }
+
+  function initAmbientParticles() {
+    ambientParticles.length = 0;
+    for (let i = 0; i < particleCount; i++) {
+      ambientParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: rand(-0.15, 0.15),
+        vy: rand(-0.15, 0.15),
+        size: rand(0.5, 2),
+        opacity: rand(0.05, 0.25),
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  /* ============================================================
+     SIMULATION UPDATE
+     ============================================================ */
+  function updateBacteria() {
+    for (const b of bacteria) {
+      b.vx += rand(-0.015, 0.015);
+      b.vy += rand(-0.015, 0.015);
+      b.va += rand(-0.002, 0.002);
+      b.vx *= 0.985; b.vy *= 0.985; b.va *= 0.98;
+      b.x += b.vx; b.y += b.vy; b.angle += b.va;
+      const dx = b.x - CX, dy = b.y - CY;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d > dishInnerRadius - 30) {
+        const nx = dx / d, ny = dy / d;
+        b.vx -= nx * 0.02; b.vy -= ny * 0.02;
+      }
+      b.glowPhase += b.glowSpeed;
+      b.plasmidPhase += 0.02;
+      b.trail.push({ x: b.x, y: b.y, angle: b.angle });
+      if (b.trail.length > 8) b.trail.shift();
+    }
+  }
+
+  function updateAmbientParticles() {
+    for (const p of ambientParticles) {
+      p.x += p.vx; p.y += p.vy;
+      p.phase += 0.01;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+    }
+  }
+
+  function updateCamera() {
+    if (appState.selectedIndex >= 0) {
+      const b = bacteria[appState.selectedIndex];
+      camera.targetX = b.x;
+      camera.targetY = b.y;
+      camera.targetScale = 4.5;
+    } else {
+      camera.targetX = CX; camera.targetY = CY; camera.targetScale = 1;
+    }
+    camera.x += (camera.targetX - camera.x) * 0.035;
+    camera.y += (camera.targetY - camera.y) * 0.035;
+    camera.scale += (camera.targetScale - camera.scale) * 0.035;
+  }
+
+  function updateTransitions() {
+    const target = (appState.mode === 'CELL_SELECTED' || PANEL_OPEN_MODES.includes(appState.mode)) ? 1 : 0;
+    appState.cellZoom += (target - appState.cellZoom) * 0.05;
+    if (appState.cellZoom < 0.001) appState.cellZoom = 0;
+    if (appState.cellZoom > 0.999) appState.cellZoom = 1;
+  }
+
+  function updateHover() {
+    if (appState.mode !== 'IDLE') { appState.hoverIndex = -1; return; }
+    const w = screenToWorld(appState.mouseX, appState.mouseY);
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < bacteria.length; i++) {
+      const b = bacteria[i];
+      const dx = w.x - b.x, dy = w.y - b.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < b.length && d < bestD) { bestD = d; best = i; }
+    }
+    appState.hoverIndex = best;
+  }
+
+  /* ============================================================
+     HIT DETECTION
+     ============================================================ */
+  function getBacteriumAt(wx, wy) {
+    for (let i = 0; i < bacteria.length; i++) {
+      const b = bacteria[i];
+      const dx = wx - b.x, dy = wy - b.y;
+      const cos = Math.cos(-b.angle), sin = Math.sin(-b.angle);
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      if (Math.abs(lx) < b.length/2 + 6 && Math.abs(ly) < b.width/2 + 6) return i;
+    }
+    return -1;
+  }
+
+  // Plasmid tap target — single source of truth.
+  // ------------------------------------------------------------
+  // drawMagnifiedCell() renders the magnified cell (and the plasmid
+  // inside it) directly in SCREEN space: translate to screen center
+  // (CX, CY), rotate by the bacterium's angle, then offset to the
+  // plasmid's local position. It never goes through the world<->screen
+  // camera transform used by the idle petri-dish view.
+  //
+  // The old isPlasmidHit() checked world-space coordinates instead
+  // (via screenToWorld + the camera's pan/zoom), a completely
+  // different coordinate system from what's actually drawn. The two
+  // only ever lined up by coincidence, and would drift apart on other
+  // screen sizes/aspect ratios or the moment camera parameters change.
+  // getPlasmidScreenPos() below reuses drawMagnifiedCell's own formula,
+  // so the hit test and the drawing can never disagree.
+  const PLASMID_BASE_RADIUS = 28;
+  const PLASMID_TAP_MARGIN = 14; // matches the animated dashed "tap here" ring
+
+  function getPlasmidScreenPos() {
+    if (appState.selectedIndex < 0) return null;
+    const cLen = Math.min(W, H) * 0.55;
+    const cWid = cLen * 0.45;
+    const localX = cLen * 0.22;
+    const localY = 0;
+    // The magnified cell is always drawn horizontal now (see
+    // drawMagnifiedCell) — no rotation term here means this stays the
+    // exact inverse of that rendering, whatever the bacterium's
+    // underlying (untouched) dish angle happens to be.
+    return { x: CX + localX, y: CY + localY };
+  }
+
+  function isPlasmidHit(sx, sy) {
+    const pos = getPlasmidScreenPos();
+    if (!pos) return false;
+    const hitRadius = PLASMID_BASE_RADIUS + PLASMID_TAP_MARGIN;
+    const dx = sx - pos.x, dy = sy - pos.y;
+    return (dx * dx + dy * dy) < hitRadius * hitRadius;
+  }
+
+  /* ============================================================
+     PANEL / SEQUENCE LOGIC
+     ============================================================ */
+  // Adds a small 1-based position number to a base bubble on ruler
+  // ticks (every 5th position, plus the very first and last) — lets
+  // the student count "which base is this" directly from the strand
+  // instead of scrolling blind and losing track, which was the actual
+  // root cause behind several rounds of selection confusion.
+  // Ticks are positioned from the ACTUAL rendered base elements, not
+  // from a second independently-computed flex/grid row. Each tick's
+  // left offset and width are copied directly from its corresponding
+  // .base element's real box (getBoundingClientRect, relative to the
+  // ruler's own position) — the same coordinate the dotted pairing
+  // guide (.base::after) is already centered on, so number, guide,
+  // and nucleotide all share one source of truth for their X position.
+  function buildPositionRuler(rulerEl, baseContainerEl, seqLength) {
+    rulerEl.innerHTML = '';
+    const rulerRect = rulerEl.getBoundingClientRect();
+    const baseEls = baseContainerEl.children;
+    for (let i = 0; i < seqLength; i++) {
+      const oneBased = i + 1;
+      const isTick = oneBased % 5 === 0 || i === 0 || i === seqLength - 1;
+      if (!isTick) continue;
+      const baseRect = baseEls[i].getBoundingClientRect();
+      const span = document.createElement('span');
+      span.className = 'pos-tick';
+      span.textContent = String(oneBased);
+      span.style.left = (baseRect.left - rulerRect.left) + 'px';
+      span.style.width = baseRect.width + 'px';
+      rulerEl.appendChild(span);
+    }
+  }
+
+  function buildSequenceUI() {
+    if (appState.selectedIndex < 0) return;
+    const b = bacteria[appState.selectedIndex];
+    const seq = b.plasmid.seq;
+    const comp = b.plasmid.complement;
+
+    // Top strand — the ONLY selectable strand. Every nucleotide is a
+    // real, uniquely-indexed object (index 0..seq.length-1), and that
+    // index — not screen position — is what selection/validation uses.
+    // No position is pre-marked as "the answer": the student is free
+    // to test any 6-base window.
+    seqBasesEl.innerHTML = '';
+    for (let i = 0; i < seq.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'base';
+      span.textContent = seq[i];
+      span.dataset.index = i;
+      span.addEventListener('pointerdown', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        onBaseClick(i);
+      });
+      seqBasesEl.appendChild(span);
+    }
+    buildPositionRuler(posRulerEl, seqBasesEl, seq.length);
+
+    // Bottom (complementary) strand — rendered for biological accuracy
+    // only. No pointer listeners are attached here, so these bases can
+    // never be selected or mixed into a top-strand selection.
+    seqBasesComplementEl.innerHTML = '';
+    for (let i = 0; i < comp.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'base-static';
+      span.textContent = comp[i];
+      seqBasesComplementEl.appendChild(span);
+    }
+  }
+
+  function onBaseClick(index) {
+    // Selection is only ever meant to be live during PLASMID_ANALYSIS.
+    // (Broadened from checking only mode==='SUCCESS' — now that PLASMID_CUT
+    // exists as its own mode sharing this same stage container, that
+    // narrower check would stop guarding once the plasmid is actually cut.)
+    if (appState.mode !== 'PLASMID_ANALYSIS') return;
+    const b = bacteria[appState.selectedIndex];
+    const base = b.plasmid.seq[index];
+    const indices = appState.selectedBases.map(s => s.index);
+    const existingIdx = indices.indexOf(index);
+
+    if (existingIdx >= 0) {
+      // Freely toggle off any pick — an earlier version of this fix
+      // only allowed removing from either end, but that was needless:
+      // the span rule below already guarantees the final 6 can't have
+      // a gap, so mid-selection gaps are fine while still choosing.
+      appState.selectedBases.splice(existingIdx, 1);
+      updateSelectionUI();
+      return;
+    }
+
+    if (appState.selectedBases.length >= 6) {
+      statusArea.className = 'status-area show status-error';
+      statusArea.textContent = 'Maximum 6 bases. Deselect one first.';
+      setTimeout(() => { if (appState.selectedBases.length < 6) statusArea.className = ''; }, 1500);
+      return;
+    }
+
+    // Reject a pick only if it would make a contiguous 6-base window
+    // mathematically impossible — i.e. it plus the existing picks would
+    // span more than 6 positions. This is deliberately more permissive
+    // than "must extend from an end": it allows tapping bases in ANY
+    // order (both ends first, then filling the middle, etc.), while
+    // still guaranteeing — by pigeonhole, not by restricting order —
+    // that 6 accepted picks can only ever be the same 6 consecutive
+    // positions. A non-contiguous final selection remains impossible.
+    if (indices.length > 0) {
+      const span = Math.max(...indices, index) - Math.min(...indices, index) + 1;
+      if (span > 6) {
+        const existingGaps = findGapIndices(appState.selectedBases);
+        statusArea.className = 'status-area show status-error';
+        statusArea.textContent = existingGaps.size > 0
+          ? 'Fill the pulsing gap in your current selection first'
+          : 'That base is too far from your current picks for a 6-base site';
+        setTimeout(() => { if (appState.selectedBases.length < 6) statusArea.className = ''; }, 1600);
+        return;
+      }
+    }
+
+    appState.selectedBases.push({ index, base });
+    updateSelectionUI();
+
+    if (appState.selectedBases.length === 6) {
+      validateSelection();
+    }
+  }
+
+  function updateSelectionUI() {
+    const b = bacteria[appState.selectedIndex];
+    if (!b) return;
+    const seq = b.plasmid.seq;
+
+    // Strand bubbles: a picked base empties out — its letter is removed
+    // and reappears down in the tray — rather than staying visible with
+    // a highlight. Any unpicked base sitting inside the current picks'
+    // span pulses amber — that's the gap left to fill, since the
+    // span-based selection rule allows filling a site's bases in any
+    // order (e.g. both ends before the middle).
+    const gapIndices = findGapIndices(appState.selectedBases);
+    const baseEls = seqBasesEl.querySelectorAll('.base');
+    baseEls.forEach((el, i) => {
+      const isPicked = appState.selectedBases.some(s => s.index === i);
+      el.className = 'base';
+      el.textContent = seq[i];
+      if (isPicked) {
+        el.classList.add('picked');
+      } else if (gapIndices.has(i)) {
+        el.classList.add('gap-needed');
+      }
+    });
+
+    // Tray reads left-to-right in genomic order (5'→3'), regardless of
+    // the order the bases were tapped in — the student picks freely,
+    // the tool assembles the window correctly.
+    const sorted = [...appState.selectedBases].sort((a, c) => a.index - c.index);
+    readoutEl.innerHTML = '';
+    for (let i = 0; i < 6; i++) {
+      const span = document.createElement('span');
+      if (i < sorted.length) {
+        span.textContent = sorted[i].base;
+        span.style.color = '#fff';
+        span.style.textShadow = '0 0 8px rgba(180,140,255,0.5)';
+      } else {
+        span.className = 'empty-slot';
+        span.textContent = '_';
+      }
+      span.style.margin = '0 2px';
+      readoutEl.appendChild(span);
+    }
+
+    // Clear status if not full
+    if (appState.selectedBases.length < 6) {
+      statusArea.className = '';
+      statusArea.textContent = '';
+      btnRestrict.disabled = true;
+      btnRestrict.textContent = 'Restrict';
+      appState.matchedEnzyme = null;
+    }
+  }
+
+  function validateSelection() {
+    const sorted = [...appState.selectedBases].sort((a, c) => a.index - c.index);
+    const indices = sorted.map(s => s.index);
+    const isConsecutive = indices.every((idx, i) => i === 0 || idx === indices[i - 1] + 1);
+    const fragment = sorted.map(s => s.base).join('');
+
+    if (!isConsecutive) {
+      statusArea.className = 'status-area show status-error';
+      statusArea.textContent = '✗ Bases must be consecutive — the red-outlined picks on the strand don\'t connect to the rest';
+      btnRestrict.disabled = true;
+      appState.matchedEnzyme = null;
+      return;
+    }
+
+    const enzyme = findMatchingEnzyme(fragment);
+    if (enzyme) {
+      statusArea.className = 'status-area show status-success';
+      statusArea.innerHTML =
+        `✓ RECOGNITION SITE IDENTIFIED<br>` +
+        `<strong style="font-size:15px;letter-spacing:3px;">${fragment}</strong><br>` +
+        `<span style="font-size:10px;opacity:0.75">Cleaved by ${enzyme.name} — ${enzyme.source}</span>`;
+      btnRestrict.disabled = false;
+      appState.matchedEnzyme = enzyme;
+      setMode('SUCCESS');
+    } else {
+      statusArea.className = 'status-area show status-error';
+      statusArea.innerHTML =
+        `✗ <strong>${fragment}</strong> is not a recognition site<br>` +
+        `<span style="font-size:10px;opacity:0.7">for EcoRI, BamHI, or HindII</span>`;
+      btnRestrict.disabled = true;
+      appState.matchedEnzyme = null;
+    }
+  }
+
+  /* ============================================================
+     STAGE NAVIGATION HELPERS
+     ============================================================ */
+  function showStage(name) {
+    Object.entries(STAGES).forEach(([key, el]) => {
+      el.classList.toggle('stage-hidden', key !== name);
+    });
+  }
+
+  function setPanelHeader(title, subtitle) {
+    panelTitle.textContent = title;
+    panelSubtitle.textContent = subtitle;
+  }
+
+  /* ============================================================
+     GENE-OF-INTEREST STAGE
+     ------------------------------------------------------------
+     Mirrors the plasmid stage's own functions (buildSequenceUI /
+     onBaseClick / updateSelectionUI / validateSelection) closely,
+     on purpose: same interaction, same visual language, just a
+     second DNA fragment and a second piece of state
+     (geneSelectedBases / geneMatchedEnzyme instead of
+     selectedBases / matchedEnzyme). Kept as separate functions
+     rather than merged into one parameterized version so the
+     already-stabilized plasmid flow can't be affected by anything
+     added here.
+     ============================================================ */
+  // Shared by both the plasmid and gene stages (never run concurrently,
+  // so one generation counter is enough): shows the restriction enzyme
+  // docking at the recognition site, then animates the actual matched
+  // letters splitting into a paired group and an overhang group — the
+  // same real-DNA-letter technique already used for the Stage-3
+  // ligation animation, applied here to cutting instead of sealing.
+  // Blunt-cutting enzymes get two equally-colored groups (no overhang
+  // to highlight); sticky-end enzymes get the overhang half in cyan,
+  // matching the color language used everywhere else in the app.
+  function runCutAnimation(chipEl, readoutContainerEl, enzyme, onComplete) {
+    appState.cutAnimRunId += 1;
+    const runId = appState.cutAnimRunId;
+
+    const cut = computeCutDisplay(enzyme);
+    const [topLeft, topRight] = cut.topCut.split('\u2193');
+    const rightClass = enzyme.endType === 'blunt'
+      ? 'cut-split-group cut-split-left'
+      : 'cut-split-group cut-split-right';
+    readoutContainerEl.innerHTML =
+      `<span class="cut-split-group cut-split-left">${topLeft}</span>` +
+      `<span class="${rightClass}">${topRight}</span>`;
+
+    chipEl.textContent = enzyme.name;
+    chipEl.className = 'enzyme-chip';
+
+    requestAnimationFrame(() => {
+      if (appState.cutAnimRunId !== runId) return;
+      chipEl.classList.add('approaching');
+    });
+
+    setTimeout(() => {
+      if (appState.cutAnimRunId !== runId) return;
+      chipEl.classList.remove('approaching');
+      chipEl.classList.add('docked');
+    }, 700);
+
+    setTimeout(() => {
+      if (appState.cutAnimRunId !== runId) return;
+      const groups = readoutContainerEl.querySelectorAll('.cut-split-group');
+      groups[0].classList.add('split-left');
+      groups[1].classList.add('split-right');
+    }, 1300);
+
+    setTimeout(() => {
+      if (appState.cutAnimRunId !== runId) return;
+      chipEl.classList.remove('docked');
+    }, 2100);
+
+    setTimeout(() => {
+      if (appState.cutAnimRunId !== runId) return;
+      onComplete();
+    }, 2500);
+  }
+
+  function renderPlasmidCutResult() {
+    const enzyme = appState.matchedEnzyme;
+    if (!enzyme) return;
+    const cut = computeCutDisplay(enzyme);
+
+    // The one place appState.plasmidCut gets written — driven entirely
+    // by whichever enzyme was actually matched, never hard-coded.
+    appState.plasmidCut = {
+      enzyme: enzyme.name,
+      recognitionSite: enzyme.pattern,
+      cutAfter: enzyme.cutAfter,
+      endType: enzyme.endType,
+      overhang: cut.overhang,
+      source: enzyme.source,
+    };
+
+    statusArea.className = 'status-area show status-cut';
+    statusArea.innerHTML =
+      `\u2702 CUT COMPLETE — ${enzyme.name}<br>` +
+      `<span style="font-size:13px; display:inline-block; margin:4px 0;">` +
+      `5'-${buildCutLineHtml(cut.pattern.split(''), cut.cutAfter, '\u2193')}-3'<br>` +
+      `3'-${buildCutLineHtml(cut.bottomPattern.split(''), cut.bottomCutAfter, '\u2191')}-5'` +
+      `</span><br>` +
+      `<span style="font-size:10px;opacity:0.75">${cut.endLabel} · ${enzyme.source}</span>`;
+
+    btnRestrict.disabled = true;
+    btnRestrict.textContent = 'Cut ✓';
+    plasmidNextRow.style.display = 'flex';
+  }
+
+  function renderPlasmidReferenceCard() {
+    if (!appState.plasmidCut) return;
+    const enzyme = ENZYMES.find(e => e.name === appState.plasmidCut.enzyme);
+    const cut = computeCutDisplay(enzyme);
+
+    const overhangHtml = enzyme.endType === 'blunt'
+      ? `<div class="reference-overhang">Blunt end — no overhang</div>`
+      : `<div class="reference-overhang"><strong>${cut.overhang}</strong>Sticky End</div>`;
+
+    referenceCard.innerHTML =
+      `<div class="reference-enzyme">${enzyme.name}</div>` +
+      `<div class="reference-cut-lines">5'-${buildCutLineHtml(cut.pattern.split(''), cut.cutAfter, '\u2193')}-3'<br>3'-${buildCutLineHtml(cut.bottomPattern.split(''), cut.bottomCutAfter, '\u2191')}-5'</div>` +
+      overhangHtml;
+  }
+
+  function buildGeneSequenceUI() {
+    if (!appState.plasmidCut) return;
+    const { seq, complement } = getGeneSequence(appState.plasmidCut.enzyme);
+
+    seqBasesGeneEl.innerHTML = '';
+    for (let i = 0; i < seq.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'base';
+      span.textContent = seq[i];
+      span.dataset.index = i;
+      span.addEventListener('pointerdown', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        onGeneBaseClick(i);
+      });
+      seqBasesGeneEl.appendChild(span);
+    }
+    buildPositionRuler(posRulerGeneEl, seqBasesGeneEl, seq.length);
+
+    seqBasesComplementGeneEl.innerHTML = '';
+    for (let i = 0; i < complement.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'base-static';
+      span.textContent = complement[i];
+      seqBasesComplementGeneEl.appendChild(span);
+    }
+  }
+
+  function onGeneBaseClick(index) {
+    // Only live during GENE_ANALYSIS, and only before a correct match
+    // locks it — mirrors onBaseClick()'s plasmid-stage lock.
+    if (appState.mode !== 'GENE_ANALYSIS' || appState.geneMatchedEnzyme) return;
+    const { seq } = getGeneSequence(appState.plasmidCut.enzyme);
+    const base = seq[index];
+    const indices = appState.geneSelectedBases.map(s => s.index);
+    const existingIdx = indices.indexOf(index);
+
+    if (existingIdx >= 0) {
+      // Freely toggle off any pick — see onBaseClick's identical comment.
+      appState.geneSelectedBases.splice(existingIdx, 1);
+      updateGeneSelectionUI();
+      return;
+    }
+
+    if (appState.geneSelectedBases.length >= 6) {
+      statusAreaGene.className = 'status-area show status-error';
+      statusAreaGene.textContent = 'Maximum 6 bases. Deselect one first.';
+      setTimeout(() => { if (appState.geneSelectedBases.length < 6) statusAreaGene.className = ''; }, 1500);
+      return;
+    }
+
+    // Reject only if this pick would make a contiguous 6-base window
+    // impossible (span > 6) — see onBaseClick's identical reasoning.
+    // Any tap order is otherwise allowed.
+    if (indices.length > 0) {
+      const span = Math.max(...indices, index) - Math.min(...indices, index) + 1;
+      if (span > 6) {
+        const existingGaps = findGapIndices(appState.geneSelectedBases);
+        statusAreaGene.className = 'status-area show status-error';
+        statusAreaGene.textContent = existingGaps.size > 0
+          ? 'Fill the pulsing gap in your current selection first'
+          : 'That base is too far from your current picks for a 6-base site';
+        setTimeout(() => { if (appState.geneSelectedBases.length < 6) statusAreaGene.className = ''; }, 1600);
+        return;
+      }
+    }
+
+    appState.geneSelectedBases.push({ index, base });
+    updateGeneSelectionUI();
+
+    if (appState.geneSelectedBases.length === 6) {
+      validateGeneSelection();
+    }
+  }
+
+  function updateGeneSelectionUI() {
+    if (!appState.plasmidCut) return;
+    const { seq } = getGeneSequence(appState.plasmidCut.enzyme);
+
+    const gapIndices = findGapIndices(appState.geneSelectedBases);
+    const baseEls = seqBasesGeneEl.querySelectorAll('.base');
+    baseEls.forEach((el, i) => {
+      const isPicked = appState.geneSelectedBases.some(s => s.index === i);
+      el.className = 'base';
+      el.textContent = seq[i];
+      if (isPicked) {
+        el.classList.add('picked');
+      } else if (gapIndices.has(i)) {
+        el.classList.add('gap-needed');
+      }
+    });
+
+    const sorted = [...appState.geneSelectedBases].sort((a, c) => a.index - c.index);
+    readoutGeneEl.innerHTML = '';
+    for (let i = 0; i < 6; i++) {
+      const span = document.createElement('span');
+      if (i < sorted.length) {
+        span.textContent = sorted[i].base;
+        span.style.color = '#fff';
+        span.style.textShadow = '0 0 8px rgba(180,140,255,0.5)';
+      } else {
+        span.className = 'empty-slot';
+        span.textContent = '_';
+      }
+      span.style.margin = '0 2px';
+      readoutGeneEl.appendChild(span);
+    }
+
+    if (appState.geneSelectedBases.length < 6) {
+      statusAreaGene.className = '';
+      statusAreaGene.textContent = '';
+      btnCutGene.disabled = true;
+      appState.geneMatchedEnzyme = null;
+    }
+  }
+
+  function validateGeneSelection() {
+    const requiredEnzyme = ENZYMES.find(e => e.name === appState.plasmidCut.enzyme);
+    const sorted = [...appState.geneSelectedBases].sort((a, c) => a.index - c.index);
+    const indices = sorted.map(s => s.index);
+    const isConsecutive = indices.every((idx, i) => i === 0 || idx === indices[i - 1] + 1);
+    const fragment = sorted.map(s => s.base).join('');
+
+    if (!isConsecutive) {
+      statusAreaGene.className = 'status-area show status-error';
+      statusAreaGene.textContent = '✗ Bases must be consecutive — the red-outlined picks on the strand don\'t connect to the rest';
+      btnCutGene.disabled = true;
+      appState.geneMatchedEnzyme = null;
+      return;
+    }
+
+    // Unlike the open-ended plasmid check, the gene stage requires the
+    // SAME enzyme identity as appState.plasmidCut — a valid site for a
+    // different enzyme is explicitly wrong here, not just "not a site."
+    const matched = findMatchingEnzyme(fragment);
+
+    if (matched && matched.name === requiredEnzyme.name) {
+      statusAreaGene.className = 'status-area show status-success';
+      statusAreaGene.innerHTML =
+        `✓ RECOGNITION SITE IDENTIFIED<br>` +
+        `<strong style="font-size:15px;letter-spacing:3px;">${fragment}</strong><br>` +
+        `<span style="font-size:10px;opacity:0.75">Same enzyme: ${matched.name}</span>`;
+      btnCutGene.disabled = false;
+      appState.geneMatchedEnzyme = matched;
+    } else if (matched) {
+      statusAreaGene.className = 'status-area show status-error';
+      statusAreaGene.innerHTML =
+        `✗ Wrong restriction site<br>` +
+        `<span style="font-size:10px;opacity:0.75">That's a ${matched.name} site. Use the same restriction enzyme that was used to cut the plasmid (${requiredEnzyme.name}).</span>`;
+      btnCutGene.disabled = true;
+      appState.geneMatchedEnzyme = null;
+    } else {
+      statusAreaGene.className = 'status-area show status-error';
+      statusAreaGene.textContent = `✗ This is not the recognition sequence for ${requiredEnzyme.name}.`;
+      btnCutGene.disabled = true;
+      appState.geneMatchedEnzyme = null;
+    }
+  }
+
+  function renderGeneCutAndComparison() {
+    const enzyme = appState.geneMatchedEnzyme;
+    if (!enzyme || !appState.plasmidCut) return;
+    const cut = computeCutDisplay(enzyme);
+
+    appState.geneCut = {
+      enzyme: enzyme.name,
+      recognitionSite: enzyme.pattern,
+      cutAfter: enzyme.cutAfter,
+      endType: enzyme.endType,
+      overhang: cut.overhang,
+      source: enzyme.source,
+    };
+
+    statusAreaGeneCut.className = 'status-area show status-cut';
+    statusAreaGeneCut.innerHTML =
+      `\u2702 CUT COMPLETE — ${enzyme.name}<br>` +
+      `<span style="font-size:13px; display:inline-block; margin:4px 0;">` +
+      `5'-${buildCutLineHtml(cut.pattern.split(''), cut.cutAfter, '\u2193')}-3'<br>` +
+      `3'-${buildCutLineHtml(cut.bottomPattern.split(''), cut.bottomCutAfter, '\u2191')}-5'` +
+      `</span><br>` +
+      `<span style="font-size:10px;opacity:0.75">${cut.endLabel}</span>`;
+
+    compareSection.style.display = 'block';
+
+    if (enzyme.endType === 'blunt') {
+      comparePlasmidEnd.textContent = 'blunt';
+      compareGeneEnd.textContent = 'blunt';
+      compatibleStatus.className = 'status-area show status-cut';
+      compatibleStatus.innerHTML =
+        `✓ COMPATIBLE ENDS<br>` +
+        `<span style="font-size:10px;opacity:0.75">Both DNA fragments were cut with the same restriction enzyme (${enzyme.name}), producing matching blunt ends — joinable by DNA ligase.</span>`;
+    } else {
+      comparePlasmidEnd.textContent = cut.overhang;
+      compareGeneEnd.textContent = cut.overhang;
+      compatibleStatus.className = 'status-area show status-cut';
+      compatibleStatus.innerHTML =
+        `✓ COMPATIBLE STICKY ENDS<br>` +
+        `<span style="font-size:10px;opacity:0.75">Both DNA fragments were cut with the same restriction enzyme (${enzyme.name}), so their ${cut.overhang} overhangs can base-pair with each other.</span>`;
+    }
+
+    btnProceedLigation.disabled = false;
+  }
+
+  /* ============================================================
+     STAGE 4 — INSERTION → STICKY-END ANNEALING → SIMULATED LIGATION
+     ------------------------------------------------------------
+     Everything here is driven by appState.plasmidCut / geneCut —
+     the actual enzyme, overhang, and end type from the earlier
+     stages — never hard-coded to one enzyme. Uses the SAME
+     computeCutDisplay-derived data those stages already produced.
+     ============================================================ */
+  // Splits the already-computed, already-verified cut display at the
+  // cut arrow to get each strand's two real halves — no new sequence
+  // math, just reformatting data the app already trusts.
+  // Locates the enzyme's recognition site within an actual sequence
+  // string (reused from the same matchesPattern already trusted for
+  // selection validation), so flanking context is found, not assumed.
+  function findSiteIndex(seq, enzyme) {
+    for (let i = 0; i <= seq.length - enzyme.pattern.length; i++) {
+      if (matchesPattern(seq.slice(i, i + enzyme.pattern.length), enzyme.pattern)) return i;
+    }
+    return -1;
+  }
+
+  // Real bases immediately outside the recognition site, pulled
+  // directly from the actual source sequence (PLASMID.seq or a
+  // GENE_TEMPLATES entry) — never invented, never a placeholder word.
+  function getFlankingContext(seq, enzyme, maxLen) {
+    const siteIdx = findSiteIndex(seq, enzyme);
+    if (siteIdx < 0) return { left: '', right: '', leftTrunc: false, rightTrunc: false };
+    const siteEnd = siteIdx + enzyme.pattern.length;
+    const leftStart = Math.max(0, siteIdx - maxLen);
+    const rightEnd = Math.min(seq.length, siteEnd + maxLen);
+    return {
+      left: seq.slice(leftStart, siteIdx),
+      right: seq.slice(siteEnd, rightEnd),
+      leftTrunc: leftStart > 0,
+      rightTrunc: rightEnd < seq.length,
+    };
+  }
+
+  // A literal notched outline of a sticky end: two bars (top/bottom
+  // strand), offset by the overhang width so the protruding strand
+  // visibly steps out past the recessed one — the physical shape of
+  // a sticky end, not just a color difference in a line of letters.
+  // variant 'leftEnd': bottom strand protrudes on the RIGHT of the icon
+  //   (matches a fragment's trailing end, e.g. plasmid's left vector arm).
+  // variant 'rightEnd': top strand protrudes on the LEFT of the icon
+  //   (matches a fragment's leading end, e.g. plasmid's right vector arm).
+  function stickyStepSVG(variant, overhangLen, label) {
+    const barH = 9, rowGap = 7, coreW = overhangLen > 0 ? 34 : 44, stepW = overhangLen > 0 ? 16 : 0;
+    const totalW = coreW + stepW;
+    const y1 = 4, y2 = y1 + barH + rowGap;
+    const paired = 'rgba(215,210,255,0.85)', overhang = 'rgba(100,220,240,0.9)';
+    let topRect, bottomRect;
+    if (variant === 'leftEnd') {
+      topRect = `<rect x="0" y="${y1}" width="${coreW}" height="${barH}" rx="2" fill="${paired}"/>`;
+      bottomRect = `<rect x="0" y="${y2}" width="${coreW}" height="${barH}" rx="2" fill="${paired}"/>` +
+        (stepW > 0 ? `<rect x="${coreW}" y="${y2}" width="${stepW}" height="${barH}" rx="2" fill="${overhang}"/>` : '');
+    } else {
+      topRect = (stepW > 0 ? `<rect x="0" y="${y1}" width="${stepW}" height="${barH}" rx="2" fill="${overhang}"/>` : '') +
+        `<rect x="${stepW}" y="${y1}" width="${coreW}" height="${barH}" rx="2" fill="${paired}"/>`;
+      bottomRect = `<rect x="${stepW}" y="${y2}" width="${coreW}" height="${barH}" rx="2" fill="${paired}"/>`;
+    }
+    const h = y2 + barH + 10;
+    return `<svg viewBox="0 0 ${totalW} ${h}" width="${totalW}" height="${h}">` +
+      topRect + bottomRect +
+      `<text x="${totalW / 2}" y="${h - 1}" text-anchor="middle" class="step-caption">${label}</text></svg>`;
+  }
+
+  // The fully-annealed/ligated counterpart: no step at all — one
+  // continuous double-stranded bar, showing that once the sticky ends
+  // have paired (and the backbone is sealed), the notch is gone.
+  function stickyMergedSVG(label) {
+    const barH = 9, rowGap = 7, w = 60;
+    const y1 = 4, y2 = y1 + barH + rowGap;
+    const paired = 'rgba(215,210,255,0.85)';
+    const h = y2 + barH + 10;
+    return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">` +
+      `<rect x="0" y="${y1}" width="${w}" height="${barH}" rx="2" fill="${paired}"/>` +
+      `<rect x="0" y="${y2}" width="${w}" height="${barH}" rx="2" fill="${paired}"/>` +
+      `<text x="${w / 2}" y="${h - 1}" text-anchor="middle" class="step-caption">${label}</text></svg>`;
+  }
+
+  function getJunctionParts(enzyme) {
+    const cut = computeCutDisplay(enzyme);
+    const [topLeft, topRight] = cut.topCut.split('\u2193');
+    const [bottomLeft, bottomRight] = cut.bottomCut.split('\u2191');
+    // Plasmid body is long — a bounded, honestly-truncated real sample.
+    // Gene template is short enough that left-flank + site + right-flank
+    // covers the ENTIRE real sequence with nothing left out (verified:
+    // 5 + 6 + 7 = 18 for every current enzyme's template).
+    const plasmidFlank = getFlankingContext(PLASMID.seq, enzyme, 5);
+    const geneFlank = getFlankingContext(GENE_TEMPLATES[enzyme.name], enzyme, 12);
+    return {
+      topLeft, topRight, bottomLeft, bottomRight,
+      overhang: cut.overhang, endType: enzyme.endType,
+      plasmidFlank, geneFlank,
+    };
+  }
+
+  function renderInsertionReady() {
+    const enzyme = ENZYMES.find(e => e.name === appState.plasmidCut.enzyme);
+    const p = getJunctionParts(enzyme);
+    const ohLen = p.overhang.length;
+    const bluntNote = ohLen === 0
+      ? '<div class="blunt-note">Blunt cut — no overhang, ends pair flush</div>' : '';
+
+    plasmidStickyDiagram.innerHTML =
+      stickyStepSVG('leftEnd', ohLen, 'LEFT ARM') +
+      stickyStepSVG('rightEnd', ohLen, 'RIGHT ARM') + bluntNote;
+    geneStickyDiagram.innerHTML =
+      stickyStepSVG('rightEnd', ohLen, 'GENE END A') +
+      stickyStepSVG('leftEnd', ohLen, 'GENE END B') + bluntNote;
+
+    preInsertSection.classList.remove('stage-hidden');
+    junctionSection.classList.add('stage-hidden');
+    junctionStrip.classList.remove('sealed-glow');
+    ligaseChip.style.display = 'none';
+    ligaseChip.style.opacity = '0';
+
+    // Cut plasmid — the SAME cut site's two ends, shown together with
+    // a visible opening between them: the linearized plasmid, not yet
+    // joined to anything. Flanking letters are the ACTUAL plasmid
+    // sequence around the cut (via getFlankingContext), not a bare
+    // ellipsis — only truncated where the sample genuinely runs out
+    // before reaching the real sequence's own boundary.
+    const pEllipL = p.plasmidFlank.leftTrunc ? '\u2026' : '';
+    const pEllipR = p.plasmidFlank.rightTrunc ? '\u2026' : '';
+    plasmidStrandTop.innerHTML =
+      `<span class="body-ellipsis">5'${pEllipL}</span><span class="paired">${p.plasmidFlank.left}${p.topLeft}</span>` +
+      `<span class="open-gap">\u2039 open \u203a</span>` +
+      `<span class="overhang">${p.topRight.slice(0, ohLen)}</span><span class="paired">${p.topRight.slice(ohLen)}${p.plasmidFlank.right}</span><span class="body-ellipsis">${pEllipR}3'</span>`;
+    plasmidStrandBottom.innerHTML =
+      `<span class="body-ellipsis">3'${pEllipL}</span><span class="paired">${complementOf(p.plasmidFlank.left)}${p.bottomLeft.slice(0, p.bottomLeft.length - ohLen)}</span><span class="overhang">${p.bottomLeft.slice(p.bottomLeft.length - ohLen)}</span>` +
+      `<span class="open-gap">\u2039 open \u203a</span>` +
+      `<span class="paired">${p.bottomRight}${complementOf(p.plasmidFlank.right)}</span><span class="body-ellipsis">${pEllipR}5'</span>`;
+
+    // Gene of interest — genuinely staggered antiparallel strands, since
+    // this fragment is NOT yet annealed to anything and has real
+    // single-stranded overhangs at both ends. Only the true overhang
+    // portion (p.overhang, not all of topRight) is unpaired; bottom is
+    // built as the real complement of the fragment's actual paired
+    // core, with its own overhang trailing at the far end — verified
+    // to exactly match true antiparallel base-pairing, not reassembled
+    // from mismatched-length label fragments (which produced real
+    // base-pair mismatches before this fix).
+    const pairedCore = p.topRight.slice(ohLen) + p.geneFlank.right + p.geneFlank.left + p.topLeft;
+    const geneBottomReal = complementOf(pairedCore) + complementOf(p.overhang);
+    const geneSpacer = ohLen > 0 ? '\u00A0'.repeat(ohLen) : '';
+
+    geneStrandTop.innerHTML =
+      `<span class="overhang">${p.topRight.slice(0, ohLen)}</span><span class="paired">${p.topRight.slice(ohLen)}${p.geneFlank.right}${p.geneFlank.left}${p.topLeft}</span>`;
+    geneStrandBottom.innerHTML =
+      `${geneSpacer}<span class="paired">${geneBottomReal.slice(0, geneBottomReal.length - ohLen)}</span><span class="overhang">${geneBottomReal.slice(geneBottomReal.length - ohLen)}</span>`;
+
+    ligationStatus.className = 'status-area show status-cut';
+    ligationStatus.innerHTML = p.endType === 'blunt'
+      ? `Cut plasmid and Gene of Interest both carry matching blunt ends<br>` +
+        `<span style="font-size:10px;opacity:0.75">Cut with ${appState.plasmidCut.enzyme} — tap below to bring them together</span>`
+      : `Cut plasmid and Gene of Interest both carry the same ${p.overhang} sticky end<br>` +
+        `<span style="font-size:10px;opacity:0.75">Cut with ${appState.plasmidCut.enzyme} — tap below to bring them together</span>`;
+
+    insertActionRow.classList.remove('stage-hidden');
+    ligateActionRow.classList.add('stage-hidden');
+  }
+
+  // Regenerated fresh at every animation step (rather than toggling a
+  // class on a cached node) — simplest way to guarantee the nick
+  // markers' sealed/unsealed state can never drift from what's shown.
+  function renderJunctionView(sealedLeft, sealedRight, isCircular) {
+    const enzyme = ENZYMES.find(e => e.name === appState.plasmidCut.enzyme);
+    const p = getJunctionParts(enzyme);
+    const ohLen = p.overhang.length;
+
+    junctionStickyDiagram.innerHTML =
+      stickyMergedSVG('JUNCTION 1') + stickyMergedSVG('JUNCTION 2');
+
+    // A fully sealed circular plasmid has no free 5'/3' end at all — it
+    // wraps back on itself. The "5'..."/"...3'" labels are only correct
+    // while the molecule is genuinely linear (cut-open or mid-anneal);
+    // once ligated, they're replaced with a loop indicator instead of
+    // implying a loose end that no longer exists.
+    const leftCap = isCircular ? '<span class="loop-icon">\u21bb</span>' : `<span class="body-ellipsis">5'\u2026</span>`;
+    const rightCap = isCircular ? '<span class="loop-icon">\u21bb</span>' : `<span class="body-ellipsis">\u20263'</span>`;
+    const leftCapBottom = isCircular ? '<span class="loop-icon">\u21bb</span>' : `<span class="body-ellipsis">3'\u2026</span>`;
+    const rightCapBottom = isCircular ? '<span class="loop-icon">\u21bb</span>' : `<span class="body-ellipsis">\u20265'</span>`;
+
+    // Once annealed, the sticky ends have found their complementary
+    // partner and the whole junction is fully double-stranded — no
+    // more asymmetry, unlike the separate pre-insertion fragments.
+    // Built as ONE real top-strand string; the bottom strand is then
+    // the direct, position-by-position complement of that EXACT
+    // string — not reassembled from separately-derived label
+    // fragments, which is what caused real base-pair mismatches
+    // before this fix (verified: 4 of 31 positions were wrong).
+    const segments = [
+      { text: p.plasmidFlank.left, cls: 'paired' },
+      { text: p.topLeft, cls: 'paired' },
+      { nick: 0 },
+      { text: p.topRight.slice(0, ohLen), cls: 'overhang' },
+      { text: p.topRight.slice(ohLen), cls: 'paired' },
+      { text: p.geneFlank.right, cls: 'paired' },
+      { text: p.geneFlank.left, cls: 'paired' },
+      { text: p.topLeft, cls: 'paired' },
+      { nick: 1 },
+      { text: p.topRight.slice(0, ohLen), cls: 'overhang' },
+      { text: p.topRight.slice(ohLen), cls: 'paired' },
+      { text: p.plasmidFlank.right, cls: 'paired' },
+    ];
+    const fullTop = segments.filter(s => !('nick' in s)).map(s => s.text).join('');
+    const fullBottom = complementOf(fullTop);
+    const sealedFlags = [sealedLeft, sealedRight];
+
+    let topHtml = leftCap, bottomHtml = leftCapBottom, cursor = 0;
+    for (const seg of segments) {
+      if ('nick' in seg) {
+        const nickSpan = `<span class="nick-inline${sealedFlags[seg.nick] ? ' sealed' : ''}"></span>`;
+        topHtml += nickSpan;
+        bottomHtml += nickSpan;
+        continue;
+      }
+      if (seg.text.length === 0) continue; // blunt enzymes: zero-length overhang segment
+      const topSlice = fullTop.slice(cursor, cursor + seg.text.length);
+      const bottomSlice = fullBottom.slice(cursor, cursor + seg.text.length);
+      topHtml += `<span class="${seg.cls}">${topSlice}</span>`;
+      bottomHtml += `<span class="${seg.cls}">${bottomSlice}</span>`;
+      cursor += seg.text.length;
+    }
+    topHtml += rightCap;
+    bottomHtml += rightCapBottom;
+
+    junctionStrandTop.innerHTML = topHtml;
+    junctionStrandBottom.innerHTML = bottomHtml;
+  }
+
+  function performInsertion() {
+    appState.ligationRunId += 1;
+    const runId = appState.ligationRunId;
+
+    preInsertSection.classList.add('stage-hidden');
+    junctionSection.classList.remove('stage-hidden');
+    junctionLabel.textContent = 'Gene Inserted — Annealing…';
+    renderJunctionView(false, false);
+    insertActionRow.classList.add('stage-hidden');
+
+    ligationStatus.className = 'status-area show status-cut';
+    ligationStatus.textContent = 'Sticky ends pairing…';
+
+    setTimeout(() => {
+      if (appState.mode !== 'READY_FOR_INSERTION' || appState.ligationRunId !== runId) return;
+      setMode('STICKY_ENDS_ANNEALED');
+    }, 700);
+  }
+
+  function renderAnnealed() {
+    junctionLabel.textContent = 'Sticky Ends Annealed';
+    renderJunctionView(false, false);
+
+    ligationStatus.className = 'status-area show status-success';
+    ligationStatus.innerHTML =
+      `✓ STICKY ENDS ANNEALED<br>` +
+      `<span style="font-size:10px;opacity:0.85">Complementary sticky ends have paired, holding the DNA fragments together.</span><br>` +
+      `<span style="font-size:10px;opacity:0.75;color:rgba(255,190,120,0.9);">⚠ Backbone nicks remain — the two amber marks above</span>`;
+
+    ligateActionRow.classList.remove('stage-hidden');
+  }
+
+  function runLigationAnimation() {
+    appState.ligationRunId += 1;
+    const runId = appState.ligationRunId;
+
+    ligateActionRow.classList.add('stage-hidden');
+    junctionLabel.textContent = 'DNA Ligase Sealing the Backbone';
+    ligationStatus.className = 'status-area show status-cut';
+    ligationStatus.textContent = '⚙ DNA ligase moving to the first nick…';
+
+    renderJunctionView(false, false);
+    ligaseChip.style.display = 'block';
+    ligaseChip.style.opacity = '1';
+    ligaseChip.style.left = '30%';
+
+    setTimeout(() => {
+      if (appState.ligationRunId !== runId) return;
+      renderJunctionView(true, false);
+      ligationStatus.textContent = '⚙ First nick sealed — moving to the second…';
+      ligaseChip.style.left = '70%';
+    }, 1300);
+
+    setTimeout(() => {
+      if (appState.ligationRunId !== runId) return;
+      renderJunctionView(true, true);
+      ligationStatus.textContent = '⚙ Second nick sealed';
+    }, 2600);
+
+    setTimeout(() => {
+      if (appState.ligationRunId !== runId) return;
+      ligaseChip.style.opacity = '0';
+    }, 3300);
+
+    setTimeout(() => {
+      if (appState.ligationRunId !== runId) return;
+      setMode('LIGATION_COMPLETE');
+    }, 3800);
+  }
+
+  function renderLigationComplete() {
+    junctionLabel.textContent = 'Recombinant DNA — Backbone Continuous';
+    renderJunctionView(true, true, true);
+    ligaseChip.style.display = 'none';
+    junctionStrip.classList.add('sealed-glow');
+
+    ligationStatus.className = 'status-area show status-success';
+    ligationStatus.innerHTML =
+      `✓ LIGATION COMPLETE<br>` +
+      `<strong style="font-size:12px;letter-spacing:1px;">RECOMBINANT DNA FORMED</strong><br>` +
+      `<span style="font-size:10px;opacity:0.8">DNA ligase sealed the remaining nicks in the sugar-phosphate backbone.</span>`;
+  }
+
+  function openPanel() {
+    appState.panelOpen = true;
+    panel.classList.add('visible');
+    buildSequenceUI();
+    updateSelectionUI();
+  }
+
+  function closePanel() {
+    appState.panelOpen = false;
+    panel.classList.remove('visible');
+    appState.selectedBases = [];
+    appState.matchedEnzyme = null;
+    appState.plasmidCut = null;
+    appState.geneSelectedBases = [];
+    appState.geneMatchedEnzyme = null;
+    appState.geneCut = null;
+    statusArea.className = '';
+    statusArea.textContent = '';
+    btnRestrict.disabled = true;
+    btnRestrict.textContent = 'Restrict';
+    plasmidNextRow.style.display = 'none';
+    statusAreaGene.className = '';
+    statusAreaGene.textContent = '';
+    btnCutGene.disabled = true;
+    statusAreaGeneCut.className = '';
+    statusAreaGeneCut.textContent = '';
+    compareSection.style.display = 'none';
+    btnProceedLigation.disabled = true;
+    ligationStatus.className = '';
+    ligationStatus.textContent = '';
+    appState.ligationRunId += 1; // invalidates any pending ligation-animation timers
+    appState.cutAnimRunId += 1; // invalidates any pending cut-docking-animation timers
+    preInsertSection.classList.remove('stage-hidden');
+    junctionSection.classList.add('stage-hidden');
+    junctionStrip.classList.remove('sealed-glow');
+    ligaseChip.style.display = 'none';
+    ligaseChip.style.opacity = '0';
+    insertActionRow.classList.remove('stage-hidden');
+    ligateActionRow.classList.add('stage-hidden');
+    showStage('stagePlasmid');
+    setPanelHeader('Plasmid Analysis', 'Restriction Site Identification');
+  }
+
+  /* ============================================================
+     MODE TRANSITIONS — single chokepoint
+     ------------------------------------------------------------
+     Previously appState.mode was written directly in ~5 separate
+     places (the canvas pointerdown handler, validateSelection(),
+     the old deselectAll(), the Reset button), each hand-rolling its
+     own subset of the side effects (show/hide brand, hint overlay,
+     open/close panel, snap the camera zoom). That duplication is
+     exactly what makes adding new events risky — one call site gets
+     updated, another is forgotten. setMode() is now the only place
+     appState.mode is assigned; every transition's side effects live
+     here once.
+
+     SUCCESS is the one exception: it's a sub-state entered while the
+     panel is already open (validateSelection() has already written
+     the panel's content), so its case here is intentionally empty —
+     included for completeness and so future code has one obvious
+     place to route through rather than assigning appState.mode
+     directly again.
+     ============================================================ */
+  // Every mode where the analysis panel is open and the camera should
+  // stay zoomed into the cell. Shared by updateTransitions() (camera)
+  // and the canvas pointerdown handler (outside-tap-to-close), so the
+  // two can never disagree about which modes count as "panel open."
+  const PANEL_OPEN_MODES = ['PLASMID_ANALYSIS', 'SUCCESS', 'PLASMID_CUT', 'GENE_ANALYSIS', 'GENE_CUT', 'READY_FOR_INSERTION', 'STICKY_ENDS_ANNEALED', 'LIGATION_IN_PROGRESS', 'LIGATION_COMPLETE'];
+
+  function setMode(next, opts = {}) {
+    appState.mode = next;
+
+    switch (next) {
+      case 'IDLE':
+        appState.selectedIndex = -1;
+        appState.cellZoom = 0; // snap instantly rather than lerp — deselecting should feel immediate
+        brand.classList.remove('hidden');
+        hintOverlay.classList.remove('visible');
+        closePanel();
+        break;
+
+      case 'CELL_SELECTED':
+        brand.classList.add('hidden');
+        hintOverlay.classList.remove('visible');
+        closePanel(); // no-op if nothing was open — safe whether arriving fresh or backing out of the panel
+        if (opts.armHint) {
+          setTimeout(() => {
+            if (appState.mode === 'CELL_SELECTED') hintOverlay.classList.add('visible');
+          }, 800);
+        }
+        break;
+
+      case 'PLASMID_ANALYSIS':
+        hintOverlay.classList.remove('visible');
+        showStage('stagePlasmid');
+        openPanel();
+        break;
+
+      case 'SUCCESS':
+        break;
+
+      case 'PLASMID_CUT':
+        // Enzyme docks and the recognition site visibly splits before
+        // the final result renders — renderPlasmidCutResult() is now
+        // the animation's completion callback, not called directly.
+        btnRestrict.disabled = true;
+        setPanelHeader('Plasmid Analysis', 'Cutting…');
+        runCutAnimation(plasmidEnzymeChip, readoutEl, appState.matchedEnzyme, () => {
+          renderPlasmidCutResult();
+          setPanelHeader('Plasmid Analysis', 'Cut Complete');
+        });
+        break;
+
+      case 'GENE_ANALYSIS':
+        appState.geneSelectedBases = [];
+        appState.geneMatchedEnzyme = null;
+        showStage('stageGene');
+        renderPlasmidReferenceCard();
+        buildGeneSequenceUI();
+        updateGeneSelectionUI();
+        setPanelHeader('Gene of Interest', 'Find the Matching Recognition Site');
+        break;
+
+      case 'GENE_CUT':
+        // Stage stays on stage-gene (where the readout/chip live) while
+        // the cut animation plays — switching to stage-gene-cut early
+        // would hide the very elements the animation runs on.
+        btnCutGene.disabled = true;
+        setPanelHeader('Gene of Interest', 'Cutting…');
+        runCutAnimation(geneEnzymeChip, readoutGeneEl, appState.geneMatchedEnzyme, () => {
+          showStage('stageGeneCut');
+          renderGeneCutAndComparison();
+          setPanelHeader('Gene of Interest', 'Cut & Compare Sticky Ends');
+        });
+        break;
+
+      case 'READY_FOR_INSERTION':
+        showStage('stageLigation');
+        renderInsertionReady();
+        setPanelHeader('Insert Gene of Interest', 'Bring the Compatible Ends Together');
+        break;
+
+      case 'STICKY_ENDS_ANNEALED':
+        renderAnnealed();
+        setPanelHeader('Sticky-End Annealing', 'Backbone Nicks Remain');
+        break;
+
+      case 'LIGATION_IN_PROGRESS':
+        runLigationAnimation();
+        setPanelHeader('DNA Ligation', 'Sealing the Backbone');
+        break;
+
+      case 'LIGATION_COMPLETE':
+        renderLigationComplete();
+        setPanelHeader('Recombinant DNA', 'Ligation Complete');
+        break;
+    }
+  }
+
+  /* ============================================================
+     EVENT HANDLERS
+     ============================================================ */
+  function getPointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    const pos = getPointerPos(e);
+    const w = screenToWorld(pos.x, pos.y);
+
+    if (appState.mode === 'IDLE') {
+      const idx = getBacteriumAt(w.x, w.y);
+      if (idx >= 0) {
+        appState.selectedIndex = idx;
+        setMode('CELL_SELECTED', { armHint: true });
+      }
+    }
+    else if (appState.mode === 'CELL_SELECTED') {
+      if (isPlasmidHit(pos.x, pos.y)) {
+        setMode('PLASMID_ANALYSIS');
+      } else {
+        const idx = getBacteriumAt(w.x, w.y);
+        if (idx >= 0 && idx !== appState.selectedIndex) {
+          appState.selectedIndex = idx;
+        } else if (idx === -1) {
+          setMode('IDLE');
+        }
+      }
+    }
+    else if (PANEL_OPEN_MODES.includes(appState.mode)) {
+      // Click outside panel closes it on mobile, or deselects
+      const idx = getBacteriumAt(w.x, w.y);
+      if (idx === -1 && !isPlasmidHit(pos.x, pos.y)) {
+        setMode('CELL_SELECTED');
+      }
+    }
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    const pos = getPointerPos(e);
+    appState.mouseX = pos.x; appState.mouseY = pos.y;
+  });
+
+  btnReset.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    appState.cutAnimRunId += 1; // invalidate any in-flight cut animation before rebuilding the readout
+    appState.selectedBases = [];
+    appState.matchedEnzyme = null;
+    setMode('PLASMID_ANALYSIS'); // openPanel() rebuilds the strand and updateSelectionUI() clears status/Restrict
+  });
+
+  btnRestrict.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    if (btnRestrict.disabled || !appState.matchedEnzyme) return;
+    setMode('PLASMID_CUT');
+  });
+
+  btnGoToGene.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    setMode('GENE_ANALYSIS');
+  });
+
+  btnResetGene.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    appState.cutAnimRunId += 1; // invalidate any in-flight cut animation before rebuilding the readout
+    setMode('GENE_ANALYSIS'); // re-enters the same case: fresh selection state, rebuilt UI
+  });
+
+  btnCutGene.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    if (btnCutGene.disabled || !appState.geneMatchedEnzyme) return;
+    setMode('GENE_CUT');
+  });
+
+  btnProceedLigation.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    if (btnProceedLigation.disabled) return;
+    setMode('READY_FOR_INSERTION');
+  });
+
+  btnInsertGene.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    performInsertion();
+  });
+
+  btnSimulateLigation.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    setMode('LIGATION_IN_PROGRESS');
+  });
+
+  /* ============================================================
+     RENDER — IDLE / PETRI DISH
+     ============================================================ */
+  function drawPetriDish() {
+    const alpha = 1 - appState.cellZoom;
+    if (alpha <= 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Background
+    const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, Math.max(W, H));
+    g.addColorStop(0, '#0a0a18'); g.addColorStop(0.4, '#050510'); g.addColorStop(1, '#020205');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // Dish shadow
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 60; ctx.shadowOffsetY = 25;
+    ctx.beginPath(); ctx.arc(CX, CY, dishRadius, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
+    ctx.restore();
+
+    // Liquid
+    ctx.beginPath(); ctx.arc(CX, CY, dishInnerRadius, 0, Math.PI*2);
+    const lg = ctx.createRadialGradient(CX-30, CY-30, 10, CX, CY, dishInnerRadius);
+    lg.addColorStop(0, 'rgba(30,25,60,0.25)'); lg.addColorStop(0.5, 'rgba(20,20,50,0.15)'); lg.addColorStop(1, 'rgba(15,15,40,0.3)');
+    ctx.fillStyle = lg; ctx.fill();
+
+    // Glass rim
+    ctx.beginPath(); ctx.arc(CX, CY, dishRadius, 0, Math.PI*2);
+    const rg = ctx.createRadialGradient(CX, CY, dishInnerRadius, CX, CY, dishRadius);
+    rg.addColorStop(0, 'rgba(200,210,255,0.02)'); rg.addColorStop(0.5, 'rgba(180,190,240,0.08)');
+    rg.addColorStop(0.85, 'rgba(160,170,230,0.15)'); rg.addColorStop(1, 'rgba(140,150,220,0.25)');
+    ctx.fillStyle = rg; ctx.fill();
+    ctx.beginPath(); ctx.arc(CX, CY, dishRadius, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(200,210,255,0.15)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, dishInnerRadius, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(180,190,240,0.08)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, dishRadius-5, -2.8, -1.2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawIdleBacteria() {
+    const alpha = 1 - appState.cellZoom;
+    if (alpha <= 0.01) return;
+    for (let i = 0; i < bacteria.length; i++) {
+      const b = bacteria[i];
+      const isSelected = (appState.selectedIndex === i);
+      const dim = (appState.selectedIndex >= 0 && !isSelected) ? 0.2 : 1;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      for (let j = 0; j < b.trail.length - 1; j++) {
+        const t = b.trail[j];
+        const a = (j / b.trail.length) * 0.06 * dim;
+        ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.angle);
+        drawRodShape(0, 0, b.length, b.width, `rgba(180,100,255,${a})`);
+        ctx.restore();
+      }
+
+      ctx.translate(b.x, b.y); ctx.rotate(b.angle);
+      const glowInt = 0.4 + Math.sin(b.glowPhase) * 0.15;
+      ctx.shadowColor = `hsla(${b.hue},80%,60%,${glowInt*dim})`;
+      ctx.shadowBlur = isSelected ? 35 : 20;
+
+      const grad = ctx.createLinearGradient(-b.length/2, 0, b.length/2, 0);
+      grad.addColorStop(0, `hsla(${b.hue},60%,25%,${b.opacity*0.6*dim})`);
+      grad.addColorStop(0.3, `hsla(${b.hue},70%,40%,${b.opacity*0.85*dim})`);
+      grad.addColorStop(0.5, `hsla(${b.hue+10},75%,55%,${b.opacity*dim})`);
+      grad.addColorStop(0.7, `hsla(${b.hue},70%,40%,${b.opacity*0.85*dim})`);
+      grad.addColorStop(1, `hsla(${b.hue},60%,25%,${b.opacity*0.6*dim})`);
+      drawRodShape(0, 0, b.length, b.width, grad, true);
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `hsla(${b.hue+20},60%,70%,${0.25*dim})`;
+      ctx.lineWidth = 0.8;
+      drawRodOutline(0, 0, b.length-2, b.width-2);
+
+      ctx.beginPath();
+      ctx.ellipse(-2, -1, b.length*0.25, b.width*0.25, 0, 0, Math.PI*2);
+      ctx.fillStyle = `hsla(${b.hue+15},70%,65%,${0.3*dim})`;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawRodShape(x, y, len, wid, fill, doFill) {
+    const r = wid / 2;
+    ctx.beginPath();
+    ctx.moveTo(x - len/2 + r, y - wid/2);
+    ctx.lineTo(x + len/2 - r, y - wid/2);
+    ctx.arc(x + len/2 - r, y, r, -Math.PI/2, Math.PI/2);
+    ctx.lineTo(x - len/2 + r, y + wid/2);
+    ctx.arc(x - len/2 + r, y, r, Math.PI/2, -Math.PI/2);
+    ctx.closePath();
+    if (doFill) { ctx.fillStyle = fill; ctx.fill(); }
+    else { ctx.strokeStyle = fill; ctx.stroke(); }
+  }
+  function drawRodOutline(x, y, len, wid) {
+    const r = wid / 2;
+    ctx.beginPath();
+    ctx.moveTo(x - len/2 + r, y - wid/2);
+    ctx.lineTo(x + len/2 - r, y - wid/2);
+    ctx.arc(x + len/2 - r, y, r, -Math.PI/2, Math.PI/2);
+    ctx.lineTo(x - len/2 + r, y + wid/2);
+    ctx.arc(x - len/2 + r, y, r, Math.PI/2, -Math.PI/2);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Traces a smooth, organically-irregular closed path through a ring
+  // of points by moving to each edge midpoint and quadratic-curving
+  // through the vertex — softens what would otherwise be a jagged
+  // polygon into an irregular blob silhouette. Used only by the
+  // magnified-view nucleoid; sets the current path, caller fills/
+  // strokes/clips it.
+  function traceOrganicBlob(pts) {
+    const n = pts.length;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const p0 = pts[i];
+      const p1 = pts[(i + 1) % n];
+      const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+      if (i === 0) ctx.moveTo(mx, my);
+      else ctx.quadraticCurveTo(p0.x, p0.y, mx, my);
+    }
+    ctx.closePath();
+  }
+
+  /* ============================================================
+     RENDER — MAGNIFIED CELL VIEW
+     ============================================================ */
+  function drawMagnifiedCell() {
+    const t = appState.cellZoom;
+    if (t < 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = t;
+
+    // Pitch black background with subtle vignette
+    ctx.fillStyle = '#05050A';
+    ctx.fillRect(0, 0, W, H);
+
+    // Ambient particles (purple, minimal)
+    for (const p of ambientParticles) {
+      const pulse = 0.5 + Math.sin(p.phase) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(160, 130, 220, ${p.opacity * pulse * 0.4})`;
+      ctx.fill();
+    }
+
+    // Draw the selected bacterium at large scale
+    if (appState.selectedIndex >= 0) {
+      const b = bacteria[appState.selectedIndex];
+      // Actually, let's draw in screen space centered
+      const cx = CX;
+      const cy = CY;
+      const cLen = Math.min(W, H) * 0.55;
+      const cWid = cLen * 0.45;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      // Always horizontal in the magnified view, regardless of the
+      // bacterium's random orientation in the dish — b.angle itself is
+      // untouched and still drives petri-dish movement/rendering.
+
+      // ── Cell Membrane ──
+      ctx.beginPath();
+      const cr = cWid / 2;
+      ctx.moveTo(-cLen/2 + cr, -cWid/2);
+      ctx.lineTo(cLen/2 - cr, -cWid/2);
+      ctx.arc(cLen/2 - cr, 0, cr, -Math.PI/2, Math.PI/2);
+      ctx.lineTo(-cLen/2 + cr, cWid/2);
+      ctx.arc(-cLen/2 + cr, 0, cr, Math.PI/2, -Math.PI/2);
+      ctx.closePath();
+
+      // Membrane glow
+      ctx.shadowColor = 'rgba(160, 120, 255, 0.5)';
+      ctx.shadowBlur = 40;
+      ctx.strokeStyle = 'rgba(180, 140, 255, 0.6)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Inner membrane
+      ctx.beginPath();
+      ctx.moveTo(-cLen/2 + cr + 4, -cWid/2 + 4);
+      ctx.lineTo(cLen/2 - cr - 4, -cWid/2 + 4);
+      ctx.arc(cLen/2 - cr - 4, 0, cr - 4, -Math.PI/2, Math.PI/2);
+      ctx.lineTo(-cLen/2 + cr + 4, cWid/2 - 4);
+      ctx.arc(-cLen/2 + cr + 4, 0, cr - 4, Math.PI/2, -Math.PI/2);
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(140, 110, 220, 0.25)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // ── Cytoplasm (dark translucent) ──
+      ctx.beginPath();
+      ctx.moveTo(-cLen/2 + cr + 6, -cWid/2 + 6);
+      ctx.lineTo(cLen/2 - cr - 6, -cWid/2 + 6);
+      ctx.arc(cLen/2 - cr - 6, 0, cr - 6, -Math.PI/2, Math.PI/2);
+      ctx.lineTo(-cLen/2 + cr + 6, cWid/2 - 6);
+      ctx.arc(-cLen/2 + cr + 6, 0, cr - 6, Math.PI/2, -Math.PI/2);
+      ctx.closePath();
+      const cytoGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, cLen * 0.5);
+      cytoGrad.addColorStop(0, 'rgba(25, 20, 50, 0.35)');
+      cytoGrad.addColorStop(1, 'rgba(15, 12, 30, 0.55)');
+      ctx.fillStyle = cytoGrad;
+      ctx.fill();
+
+      // Soft directional highlight — simulated light source, glass-like
+      // volumetric feel rather than a flat fill.
+      ctx.save();
+      ctx.moveTo(-cLen/2 + cr + 6, -cWid/2 + 6);
+      ctx.lineTo(cLen/2 - cr - 6, -cWid/2 + 6);
+      ctx.arc(cLen/2 - cr - 6, 0, cr - 6, -Math.PI/2, Math.PI/2);
+      ctx.lineTo(-cLen/2 + cr + 6, cWid/2 - 6);
+      ctx.arc(-cLen/2 + cr + 6, 0, cr - 6, Math.PI/2, -Math.PI/2);
+      ctx.closePath();
+      ctx.clip();
+      const lightGrad = ctx.createRadialGradient(
+        -cLen * 0.18, -cWid * 0.24, 4,
+        -cLen * 0.18, -cWid * 0.24, cLen * 0.45
+      );
+      lightGrad.addColorStop(0, 'rgba(205, 195, 255, 0.10)');
+      lightGrad.addColorStop(1, 'rgba(205, 195, 255, 0)');
+      ctx.fillStyle = lightGrad;
+      ctx.fillRect(-cLen/2, -cWid/2, cLen, cWid);
+      // Faint stable-seeded molecular texture — not organelles, just
+      // enough graininess to break up the flat gradient.
+      for (const spot of b.cytoTexture) {
+        ctx.beginPath();
+        ctx.arc(spot.x * cLen, spot.y * cWid, spot.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(170, 150, 220, ${spot.o})`;
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // ── Nucleoid (chromosomal DNA) ──
+      // Irregularly compacted, non-membrane-bound chromosome: a
+      // perturbed, quadratic-smoothed blob (stable per bacterium via
+      // nucleoidSeed, so it holds still across frames) rather than a
+      // plain ellipse, with a tangle of coiled strands clipped inside
+      // it and a few denser "compaction clump" pockets.
+      ctx.save();
+      ctx.translate(-cLen * 0.28, 0);
+
+      const seeds = b.nucleoidSeed;
+      const nSeeds = seeds.length;
+      const baseRX = cLen * 0.165;
+      const baseRY = cWid * 0.28;
+      const blobPts = [];
+      for (let i = 0; i < nSeeds; i++) {
+        const ang = (i / nSeeds) * Math.PI * 2;
+        blobPts.push({
+          x: Math.cos(ang) * baseRX * seeds[i],
+          y: Math.sin(ang) * baseRY * seeds[(i + 3) % nSeeds],
+        });
+      }
+
+      // Outer soft diffuse halo (same irregular shape, slightly larger)
+      const haloPts = blobPts.map(p => ({ x: p.x * 1.1, y: p.y * 1.1 }));
+      traceOrganicBlob(haloPts);
+      const haloGrad = ctx.createRadialGradient(0, 0, baseRX * 0.3, 0, 0, baseRX * 1.25);
+      haloGrad.addColorStop(0, 'rgba(120, 90, 190, 0.12)');
+      haloGrad.addColorStop(1, 'rgba(120, 90, 190, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fill();
+
+      // Main compacted-chromosome body — translucent, so the fiber
+      // tangle drawn on top stays clearly visible through it rather
+      // than being read as a solid filled shape.
+      traceOrganicBlob(blobPts);
+      const bodyGrad = ctx.createRadialGradient(-baseRX*0.2, -baseRY*0.2, 4, 0, 0, baseRX * 1.1);
+      bodyGrad.addColorStop(0, 'rgba(90, 65, 145, 0.20)');
+      bodyGrad.addColorStop(0.6, 'rgba(70, 50, 120, 0.14)');
+      bodyGrad.addColorStop(1, 'rgba(50, 36, 95, 0.08)');
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(150, 125, 210, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Density "compaction" pockets — irregular, not uniform
+      for (const clump of b.nucleoidClumps) {
+        const clx = Math.cos(clump.a) * baseRX * clump.r;
+        const cly = Math.sin(clump.a) * baseRY * clump.r;
+        const clumpGrad = ctx.createRadialGradient(clx, cly, 0, clx, cly, baseRX * clump.size);
+        clumpGrad.addColorStop(0, 'rgba(130, 100, 200, 0.22)');
+        clumpGrad.addColorStop(1, 'rgba(130, 100, 200, 0)');
+        ctx.fillStyle = clumpGrad;
+        ctx.beginPath();
+        ctx.arc(clx, cly, baseRX * clump.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Chromosome fiber tangle — many thin fibers, each with its OWN
+      // orientation (not parallel to the others), curved and sometimes
+      // looping back on themselves, clipped to the blob so the tangle
+      // reads as compacted chromosomal DNA embedded in the nucleoid
+      // region rather than a few decorative curves drawn over it.
+      ctx.save();
+      traceOrganicBlob(blobPts);
+      ctx.clip();
+      ctx.shadowColor = 'rgba(150, 120, 220, 0.3)';
+      ctx.shadowBlur = 4;
+      for (const f of b.nucleoidFibers) {
+        const sx = Math.cos(f.a0) * baseRX * f.r0;
+        const sy = Math.sin(f.a0) * baseRY * f.r0;
+        const dx = Math.cos(f.dir);
+        const dy = Math.sin(f.dir);
+        const perpX = -dy, perpY = dx;
+        const flen = baseRX * f.len;
+        const ex = sx + dx * flen;
+        const ey = sy + dy * flen * (baseRY / baseRX);
+        const c1x = sx + dx * flen * 0.33 + perpX * flen * f.curve1 * 0.5;
+        const c1y = sy + dy * flen * 0.33 * (baseRY / baseRX) + perpY * flen * f.curve1 * 0.5 * (baseRY / baseRX);
+        const c2x = sx + dx * flen * 0.66 + perpX * flen * f.curve2 * 0.5;
+        const c2y = sy + dy * flen * 0.66 * (baseRY / baseRX) + perpY * flen * f.curve2 * 0.5 * (baseRY / baseRX);
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.bezierCurveTo(c1x, c1y, c2x, c2y, ex, ey);
+
+        // A supercoil crossing — a partial loop near the fiber's
+        // midpoint, not a full clean circle, so it reads as a fold
+        // rather than a decorative ring.
+        if (f.loopy) {
+          const mx = (sx + ex) / 2 + Math.cos(f.loopA) * flen * 0.12;
+          const my = (sy + ey) / 2 + Math.sin(f.loopA) * flen * 0.12 * (baseRY / baseRX);
+          const lr = baseRX * f.loopR;
+          ctx.moveTo(mx + lr, my);
+          ctx.arc(mx, my, lr, 0.15, Math.PI * 1.85);
+        }
+
+        ctx.strokeStyle = `rgba(160, 135, 220, ${f.op})`;
+        ctx.lineWidth = f.width;
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Definition outline
+      traceOrganicBlob(blobPts);
+      ctx.strokeStyle = 'rgba(170, 145, 225, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Label — position is now a FIXED worst-case bound, not computed
+      // per-bacterium. nucleoidSeed is hard-generated in [0.72, 1.28]
+      // (see initBacteria), so baseRY * 1.28 * 1.1 (halo scale) is the
+      // mathematically proven ceiling for ANY bacterium's shape — not
+      // an estimate of this one. The label sits past that ceiling with
+      // a further fixed margin, so it is structurally impossible for
+      // any bacterium's random seeds to produce an overlap; this no
+      // longer depends on which bacterium is selected at all. The tick
+      // line still reaches for this bacterium's actual rendered top
+      // (haloTopY) so it visually connects rather than floating with
+      // an oversized, inconsistent gap.
+      const blobTopY = Math.min(...blobPts.map(p => p.y));
+      const haloTopY = blobTopY * 1.1;
+      const MAX_SEED = 1.28; // must match the rand() upper bound in initBacteria's nucleoidSeed
+      const worstCaseTopY = -baseRY * MAX_SEED * 1.1;
+      const labelY = worstCaseTopY - 24;
+
+      ctx.strokeStyle = 'rgba(150, 130, 200, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, labelY + 8);
+      ctx.lineTo(0, haloTopY - 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(160, 145, 215, 0.55)';
+      ctx.font = '600 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('NUCLEOID', 0, labelY);
+      ctx.restore();
+
+      // ── Plasmid ──
+      const plasmidX = cLen * 0.22;
+      const plasmidY = 0;
+      const plasmidR = PLASMID_BASE_RADIUS;
+      const pulse = 1 + Math.sin(b.plasmidPhase) * 0.06;
+      const pr = plasmidR * pulse;
+
+      ctx.save();
+      ctx.translate(plasmidX, plasmidY);
+
+      // Plasmid glow
+      ctx.shadowColor = 'rgba(100, 220, 240, 0.5)';
+      ctx.shadowBlur = 30;
+
+      // Double-stranded circular DNA
+      const amp = 3.5;
+      const freq = 10;
+
+      // Strand 1
+      ctx.beginPath();
+      for (let a = 0; a <= Math.PI*2 + 0.05; a += 0.04) {
+        const twist = Math.sin(a * freq) * amp;
+        const rr = pr + twist;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        if (a === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(120, 220, 240, 0.75)';
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Strand 2
+      ctx.beginPath();
+      for (let a = 0; a <= Math.PI*2 + 0.05; a += 0.04) {
+        const twist = Math.sin(a * freq + Math.PI) * amp;
+        const rr = pr - 3.5 + twist;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        if (a === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(160, 140, 255, 0.6)';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+
+      // Base-pair rungs
+      ctx.shadowBlur = 0;
+      for (let a = 0; a < Math.PI*2; a += 0.3) {
+        const t1 = Math.sin(a * freq) * amp;
+        const t2 = Math.sin(a * freq + Math.PI) * amp;
+        const x1 = Math.cos(a) * (pr + t1);
+        const y1 = Math.sin(a) * (pr + t1);
+        const x2 = Math.cos(a) * (pr - 3.5 + t2);
+        const y2 = Math.sin(a) * (pr - 3.5 + t2);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = 'rgba(180, 200, 255, 0.3)';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+
+      // Inner glow
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 0.45, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(100, 200, 255, 0.06)';
+      ctx.fill();
+
+      // Clickable halo (when in CELL_SELECTED) — radius matches
+      // isPlasmidHit()'s actual tap margin, not an independent guess.
+      if (appState.mode === 'CELL_SELECTED') {
+        ctx.beginPath();
+        ctx.arc(0, 0, PLASMID_BASE_RADIUS + PLASMID_TAP_MARGIN, 0, Math.PI*2);
+        ctx.strokeStyle = `rgba(100, 220, 240, ${0.2 + Math.sin(Date.now() * 0.004) * 0.1})`;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.restore();
+
+      // Plasmid label — outside the cell membrane, not underneath the
+      // plasmid inside it. A short tick crosses the boundary so it
+      // still reads as attached to the plasmid, not a floating caption.
+      const plasmidLabelY = cWid / 2 + 18;
+      ctx.strokeStyle = 'rgba(100, 220, 240, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(plasmidX, plasmidY + pr + 4);
+      ctx.lineTo(plasmidX, plasmidLabelY - 8);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(120, 220, 240, 0.7)';
+      ctx.font = '600 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.letterSpacing = '2px';
+      ctx.fillText('PLASMID', plasmidX, plasmidLabelY);
+
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  /* ============================================================
+     MAIN LOOP
+     ============================================================ */
+  function animate() {
+    ctx.clearRect(0, 0, W, H);
+
+    updateBacteria();
+    updateAmbientParticles();
+    updateCamera();
+    updateTransitions();
+    updateHover();
+
+    // Background transition
+    const dishAlpha = 1 - appState.cellZoom;
+    if (dishAlpha > 0) {
+      drawPetriDish();
+      drawIdleBacteria();
+    }
+
+    if (appState.cellZoom > 0) {
+      drawMagnifiedCell();
+    }
+
+    // Hover ring in idle mode
+    if (appState.hoverIndex >= 0 && dishAlpha > 0.5) {
+      const b = bacteria[appState.hoverIndex];
+      const sp = worldToScreen(b.x, b.y);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, (b.length * 0.7) * camera.scale, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(180, 140, 255, 0.35)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  /* ============================================================
+     STARTUP
+     ============================================================ */
+  resize();
+  initBacteria();
+  initAmbientParticles();
+  animate();
+
+  window.addEventListener('resize', resize);
+})();
+</script>
+</body>
+</html>
