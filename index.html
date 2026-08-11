@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Recombigen — Coli-X</title>
+<title>Arc - Genetrix</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
@@ -47,22 +47,52 @@
     user-select: none;
     opacity: 1;
     transition: opacity 0.5s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: calc(100vw - 40px);
   }
   .brand.hidden { opacity: 0; }
+  /* Small glowing circular brand mark — dark glass orb, violet neon
+     glow, minimal DNA double-helix silhouette. Purely decorative. */
+  .brand-icon {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(130, 95, 220, 0.35), rgba(18, 14, 40, 0.9) 72%);
+    border: 1px solid rgba(180, 140, 255, 0.4);
+    box-shadow: 0 0 12px rgba(160, 120, 255, 0.5), 0 0 3px rgba(160, 120, 255, 0.35) inset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .brand-icon svg {
+    width: 17px;
+    height: 17px;
+    filter: drop-shadow(0 0 3px rgba(190, 160, 255, 0.85));
+  }
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
   .brand-title {
     font-size: 13px;
     font-weight: 700;
-    letter-spacing: 4px;
+    letter-spacing: 3px;
     color: var(--text-primary);
     text-transform: uppercase;
+    white-space: nowrap;
   }
   .brand-sub {
-    font-size: 10px;
+    font-size: 8px;
     font-weight: 400;
-    letter-spacing: 5px;
+    letter-spacing: 1px;
     color: var(--text-secondary);
     text-transform: uppercase;
     margin-top: 2px;
+    line-height: 1.3;
   }
 
   /* ── Analysis Panel (Desktop: right sidebar) ── */
@@ -830,8 +860,27 @@
   <canvas id="bioCanvas"></canvas>
 
   <div class="brand" id="brand">
-    <div class="brand-title">Recombigen</div>
-    <div class="brand-sub">Coli-X</div>
+    <div class="brand-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="dnaGrad" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#d6bfff"/>
+            <stop offset="100%" stop-color="#9a6dff"/>
+          </linearGradient>
+        </defs>
+        <path d="M6.5 2 C6.5 6, 17.5 6, 17.5 10 C17.5 14, 6.5 14, 6.5 18 C6.5 20, 8 22, 10 22"
+              stroke="url(#dnaGrad)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        <path d="M17.5 2 C17.5 6, 6.5 6, 6.5 10 C6.5 14, 17.5 14, 17.5 18 C17.5 20, 16 22, 14 22"
+              stroke="url(#dnaGrad)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        <line x1="8" y1="4.3" x2="16" y2="4.3" stroke="#c9a8ff" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+        <line x1="6.5" y1="10" x2="17.5" y2="10" stroke="#c9a8ff" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+        <line x1="8" y1="15.7" x2="16" y2="15.7" stroke="#c9a8ff" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <div class="brand-title">Arc - Genetrix</div>
+      <div class="brand-sub">Interactive Genetic Engineering Simulator</div>
+    </div>
   </div>
 
   <div id="hint-overlay">Tap the glowing plasmid to analyze its DNA</div>
