@@ -28,9 +28,10 @@ An interactive educational simulation designed to visualize key concepts in reco
 
 ## 🤝 Credits & Acknowledgements
 
-- **Kimi — Moonshot AI** — Initial ideation and prototyping
-- **GPT — OpenAI** — Development support, debugging and refinement
-- **Claude — Anthropic (Opus 4.8)** — Code generation, debugging and implementation
+- **Kimi Moonshot AI**: Initial ideation and prototyping
+- **GPT OpenAI**: Development support, debugging and refinement
+- **Perplexity**: Code Improvisation and Scientific Validation
+- **Claude Anthropic**: Code generation, debugging and implementation
 
 ## 👤 Author
 
