@@ -616,6 +616,16 @@
     color: var(--text-primary);
     line-height: 1.6;
   }
+  .gene-of-interest-swatch {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: rgba(255, 70, 70, 0.85);
+    box-shadow: 0 0 4px rgba(255, 70, 70, 0.5);
+    margin-right: 5px;
+    vertical-align: middle;
+  }
   .reference-overhang {
     margin-top: 10px;
     padding-top: 10px;
@@ -693,6 +703,16 @@
   .strip-line {
     line-height: 1.9;
   }
+  /* Groups the gene strip's two lines so the CARD's centering applies
+     to them as one unit, while the lines themselves stay left-aligned
+     relative to each other — otherwise the parent's text-align:center
+     independently re-centers each line (including any invisible
+     leading spacer used for staggering), distorting the intended
+     offset between top and bottom instead of preserving it. */
+  .strip-line-group {
+    display: inline-block;
+    text-align: left;
+  }
   .strip-line .body-ellipsis {
     color: rgba(150, 140, 200, 0.4);
     font-size: 10px;
@@ -712,6 +732,11 @@
     color: var(--accent-cyan);
     font-weight: 700;
     text-shadow: 0 0 6px rgba(100, 220, 240, 0.35);
+  }
+  .strip-line .gene-highlight-red {
+    color: rgba(255, 90, 90, 0.95);
+    font-weight: 700;
+    text-shadow: 0 0 6px rgba(255, 70, 70, 0.4);
   }
   .strip-label {
     font-size: 8px;
@@ -1049,8 +1074,10 @@
         <div class="strip-label">Gene of Interest — Cut With the Same Enzyme</div>
         <div class="sticky-diagram-row" id="gene-sticky-diagram"></div>
         <div class="molecule-strip">
-          <div class="strip-line" id="gene-strand-top"></div>
-          <div class="strip-line" id="gene-strand-bottom"></div>
+          <div class="strip-line-group">
+            <div class="strip-line" id="gene-strand-top"></div>
+            <div class="strip-line" id="gene-strand-bottom"></div>
+          </div>
         </div>
       </div>
 
@@ -1073,6 +1100,28 @@
       </div>
       <div class="panel-actions stage-hidden" id="ligate-action-row">
         <button class="panel-btn forward" id="btn-simulate-ligation">Simulate Ligation</button>
+      </div>
+      <div class="panel-actions stage-hidden" id="see-recombinants-row">
+        <button class="panel-btn forward" id="btn-see-recombinants">See Recombinants</button>
+      </div>
+    </div>
+
+    <div class="stage-panel stage-hidden" id="stage-recombinant-view">
+      <div class="panel-section">
+        <div class="section-label">Recombinant Plasmid</div>
+        <div class="molecule-strip">
+          <div class="strip-line-group">
+            <div class="strip-line" id="recombinant-strand-top"></div>
+            <div class="strip-line" id="recombinant-strand-bottom"></div>
+          </div>
+        </div>
+        <div class="reference-overhang" id="recombinant-gene-caption">
+          <span class="gene-of-interest-swatch"></span> Gene of Interest
+        </div>
+      </div>
+      <div class="status-area show status-success" id="recombinant-status">
+        PLASMID + GENE OF INTEREST = RECOMBINANT PLASMID<br>
+        <span style="font-size:10px;opacity:0.8">This plasmid, carrying the inserted Gene of Interest, now exists inside this bacterium.</span>
       </div>
     </div>
   </div>
@@ -1246,6 +1295,9 @@
     hoverIndex: -1,
     mouseX: 0, mouseY: 0,
     cellZoom: 0,     // 0→1 transition
+    recombinantMode: false,           // true once "See Recombinants" has been clicked
+    recombinantBacteriumIndex: -1,    // which bacterium was designated as carrying the recombinant plasmid
+    smoothIdleTransition: false,      // one-shot flag: lets the "See Recombinants" zoom-out lerp smoothly instead of the normal instant-snap deselect
     panelOpen: false,
     selectedBases: [], // array of {index, base}, in selection order
     matchedEnzyme: null, // set by validateSelection() when the current selection is a real site
@@ -1287,7 +1339,8 @@
   const stageGene     = document.getElementById('stage-gene');
   const stageGeneCut  = document.getElementById('stage-gene-cut');
   const stageLigation = document.getElementById('stage-ligation');
-  const STAGES = { stagePlasmid, stageGene, stageGeneCut, stageLigation };
+  const stageRecombinantView = document.getElementById('stage-recombinant-view');
+  const STAGES = { stagePlasmid, stageGene, stageGeneCut, stageLigation, stageRecombinantView };
 
   // Stage 1 extra: the "move on" row, shown only after a successful cut
   const plasmidNextRow = document.getElementById('plasmid-next-row');
@@ -1332,6 +1385,10 @@
   const ligaseChip         = document.getElementById('ligase-chip');
   const insertActionRow    = document.getElementById('insert-action-row');
   const ligateActionRow    = document.getElementById('ligate-action-row');
+  const seeRecombinantsRow = document.getElementById('see-recombinants-row');
+  const btnSeeRecombinants = document.getElementById('btn-see-recombinants');
+  const recombinantStrandTop    = document.getElementById('recombinant-strand-top');
+  const recombinantStrandBottom = document.getElementById('recombinant-strand-bottom');
   const btnInsertGene      = document.getElementById('btn-insert-gene');
   const btnSimulateLigation = document.getElementById('btn-simulate-ligation');
   const ligationStatus = document.getElementById('ligation-status');
@@ -2272,9 +2329,9 @@
     const geneSpacer = ohLen > 0 ? '\u00A0'.repeat(ohLen) : '';
 
     geneStrandTop.innerHTML =
-      `<span class="overhang">${p.topRight.slice(0, ohLen)}</span><span class="paired">${p.topRight.slice(ohLen)}${p.geneFlank.right}${p.geneFlank.left}${p.topLeft}</span>`;
+      `<span class="body-ellipsis">5'</span><span class="overhang">${p.topRight.slice(0, ohLen)}</span><span class="paired">${p.topRight.slice(ohLen)}${p.geneFlank.right}${p.geneFlank.left}${p.topLeft}</span><span class="body-ellipsis">3'</span>`;
     geneStrandBottom.innerHTML =
-      `${geneSpacer}<span class="paired">${geneBottomReal.slice(0, geneBottomReal.length - ohLen)}</span><span class="overhang">${geneBottomReal.slice(geneBottomReal.length - ohLen)}</span>`;
+      `${geneSpacer}<span class="body-ellipsis">3'</span><span class="paired">${geneBottomReal.slice(0, geneBottomReal.length - ohLen)}</span><span class="overhang">${geneBottomReal.slice(geneBottomReal.length - ohLen)}</span><span class="body-ellipsis">5'</span>`;
 
     ligationStatus.className = 'status-area show status-cut';
     ligationStatus.innerHTML = p.endType === 'blunt'
@@ -2426,6 +2483,51 @@
     }, 3800);
   }
 
+  // Final showcase view, reached only via "See Recombinants". Reuses
+  // getJunctionParts() — the exact same real data every other cut/
+  // insertion/ligation view already draws from — and the same single
+  // complementOf() construction that makes mismatched base-pairing
+  // structurally impossible (proven earlier for renderJunctionView).
+  // The only new thing here is which segments get colored red: the
+  // gene's own actual contribution (everything between where the two
+  // nicks used to be) rather than the paired/overhang distinction used
+  // during the technical cut/anneal views.
+  function renderRecombinantPlasmidView() {
+    const enzyme = ENZYMES.find(e => e.name === appState.plasmidCut.enzyme);
+    const p = getJunctionParts(enzyme);
+    const ohLen = p.overhang.length;
+
+    const segments = [
+      { text: p.plasmidFlank.left, cls: 'paired' },
+      { text: p.topLeft, cls: 'paired' },
+      { text: p.topRight, cls: 'gene-highlight-red' },
+      { text: p.geneFlank.right, cls: 'gene-highlight-red' },
+      { text: p.geneFlank.left, cls: 'gene-highlight-red' },
+      { text: p.topLeft, cls: 'gene-highlight-red' },
+      { text: p.topRight, cls: 'paired' },
+      { text: p.plasmidFlank.right, cls: 'paired' },
+    ];
+    const fullTop = segments.map(s => s.text).join('');
+    const fullBottom = complementOf(fullTop);
+
+    let topHtml = '<span class="loop-icon">\u21bb</span>';
+    let bottomHtml = '<span class="loop-icon">\u21bb</span>';
+    let cursor = 0;
+    for (const seg of segments) {
+      if (seg.text.length === 0) continue;
+      const topSlice = fullTop.slice(cursor, cursor + seg.text.length);
+      const bottomSlice = fullBottom.slice(cursor, cursor + seg.text.length);
+      topHtml += `<span class="${seg.cls}">${topSlice}</span>`;
+      bottomHtml += `<span class="${seg.cls}">${bottomSlice}</span>`;
+      cursor += seg.text.length;
+    }
+    topHtml += '<span class="loop-icon">\u21bb</span>';
+    bottomHtml += '<span class="loop-icon">\u21bb</span>';
+
+    recombinantStrandTop.innerHTML = topHtml;
+    recombinantStrandBottom.innerHTML = bottomHtml;
+  }
+
   function renderLigationComplete() {
     junctionLabel.textContent = 'Recombinant DNA — Backbone Continuous';
     renderJunctionView(true, true, true);
@@ -2506,7 +2608,7 @@
   // stay zoomed into the cell. Shared by updateTransitions() (camera)
   // and the canvas pointerdown handler (outside-tap-to-close), so the
   // two can never disagree about which modes count as "panel open."
-  const PANEL_OPEN_MODES = ['PLASMID_ANALYSIS', 'SUCCESS', 'PLASMID_CUT', 'GENE_ANALYSIS', 'GENE_CUT', 'READY_FOR_INSERTION', 'STICKY_ENDS_ANNEALED', 'LIGATION_IN_PROGRESS', 'LIGATION_COMPLETE'];
+  const PANEL_OPEN_MODES = ['PLASMID_ANALYSIS', 'SUCCESS', 'PLASMID_CUT', 'GENE_ANALYSIS', 'GENE_CUT', 'READY_FOR_INSERTION', 'STICKY_ENDS_ANNEALED', 'LIGATION_IN_PROGRESS', 'LIGATION_COMPLETE', 'RECOMBINANT_PLASMID_VIEW'];
 
   function setMode(next, opts = {}) {
     appState.mode = next;
@@ -2514,7 +2616,12 @@
     switch (next) {
       case 'IDLE':
         appState.selectedIndex = -1;
-        appState.cellZoom = 0; // snap instantly rather than lerp — deselecting should feel immediate
+        // Normally snaps instantly — deselecting should feel immediate.
+        // The one exception is the "See Recombinants" transition, which
+        // sets smoothIdleTransition first to let the existing per-frame
+        // lerp (updateCamera) animate the zoom-out smoothly instead.
+        if (!appState.smoothIdleTransition) appState.cellZoom = 0;
+        appState.smoothIdleTransition = false;
         brand.classList.remove('hidden');
         hintOverlay.classList.remove('visible');
         closePanel();
@@ -2593,7 +2700,14 @@
 
       case 'LIGATION_COMPLETE':
         renderLigationComplete();
+        seeRecombinantsRow.classList.remove('stage-hidden');
         setPanelHeader('Recombinant DNA', 'Ligation Complete');
+        break;
+
+      case 'RECOMBINANT_PLASMID_VIEW':
+        showStage('stageRecombinantView');
+        renderRecombinantPlasmidView();
+        setPanelHeader('Recombinant Bacterium', 'Exploring the Inserted Gene');
         break;
     }
   }
@@ -2619,7 +2733,11 @@
     }
     else if (appState.mode === 'CELL_SELECTED') {
       if (isPlasmidHit(pos.x, pos.y)) {
-        setMode('PLASMID_ANALYSIS');
+        if (appState.recombinantMode && appState.selectedIndex === appState.recombinantBacteriumIndex) {
+          setMode('RECOMBINANT_PLASMID_VIEW');
+        } else {
+          setMode('PLASMID_ANALYSIS');
+        }
       } else {
         const idx = getBacteriumAt(w.x, w.y);
         if (idx >= 0 && idx !== appState.selectedIndex) {
@@ -2688,6 +2806,14 @@
   btnSimulateLigation.addEventListener('pointerdown', e => {
     e.stopPropagation(); e.preventDefault();
     setMode('LIGATION_IN_PROGRESS');
+  });
+
+  btnSeeRecombinants.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    appState.recombinantMode = true;
+    appState.recombinantBacteriumIndex = Math.floor(Math.random() * bacteria.length);
+    appState.smoothIdleTransition = true;
+    setMode('IDLE');
   });
 
   /* ============================================================
@@ -2774,6 +2900,23 @@
       ctx.fillStyle = `hsla(${b.hue+15},70%,65%,${0.3*dim})`;
       ctx.fill();
       ctx.restore();
+
+      // Recombinant bacterium marker — subtle dashed red ring, shown
+      // only after "See Recombinants" and only on the one designated
+      // bacterium. Purely additive; every other bacterium's rendering
+      // above is completely unchanged.
+      if (appState.recombinantMode && i === appState.recombinantBacteriumIndex) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(b.x, b.y);
+        ctx.beginPath();
+        ctx.arc(0, 0, b.length * 0.55, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 90, 90, 0.55)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
@@ -3139,6 +3282,43 @@
       ctx.arc(0, 0, pr * 0.45, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(100, 200, 255, 0.06)';
       ctx.fill();
+
+      // Gene of Interest highlight — redraws the SAME two strand paths
+      // (identical twist formulas to strand1/strand2 above) within the
+      // gene's angular range, in red, so the highlight is genuinely
+      // part of the double helix geometry rather than a separate
+      // overlay shape. Shown on BOTH strands, since the inserted gene
+      // is double-stranded DNA like the rest of the plasmid. No
+      // sequence data touched — purely a visual marker.
+      if (appState.recombinantMode && appState.selectedIndex === appState.recombinantBacteriumIndex) {
+        const geneStart = -0.35, geneEnd = 0.35;
+        ctx.beginPath();
+        for (let a = geneStart; a <= geneEnd; a += 0.02) {
+          const twist = Math.sin(a * freq) * amp;
+          const rr = pr + twist;
+          const x = Math.cos(a) * rr;
+          const y = Math.sin(a) * rr;
+          if (a === geneStart) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(255, 70, 70, 0.95)';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let a = geneStart; a <= geneEnd; a += 0.02) {
+          const twist = Math.sin(a * freq + Math.PI) * amp;
+          const rr = pr - 3.5 + twist;
+          const x = Math.cos(a) * rr;
+          const y = Math.sin(a) * rr;
+          if (a === geneStart) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(255, 70, 70, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       // Clickable halo (when in CELL_SELECTED) — radius matches
       // isPlasmidHit()'s actual tap margin, not an independent guess.
