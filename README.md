@@ -18,8 +18,6 @@ An interactive educational simulation designed to visualize key concepts in reco
 - 🔬 **Step-by-Step Learning** — Understand the process by interacting with the DNA.
 - 🌙 **Dark Interface** — Clean, focused visual design for learning.
 
-> **Learn by doing.**
-
 ## 🚀 Build & Hosting
 
 - **Repository:** GitHub
