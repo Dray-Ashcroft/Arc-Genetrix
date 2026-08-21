@@ -1,7 +1,7 @@
 create-pages:
   script:
     - mkdir -p public
-    - cp -r index.html assets css js public/
+    - cp -r . public/
   pages: true
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
