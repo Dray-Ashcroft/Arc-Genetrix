@@ -4,4 +4,4 @@ create-pages:
             - cp -r index.html assets css js public/ || true
               pages: true
                 rules:
-                    - if: $CI_COMMIT_BRANCH == "main"
+                    - if: '$CI_COMMIT_BRANCH == "main"'
