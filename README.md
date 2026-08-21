@@ -8,7 +8,7 @@
 
   > An educational simulation exploring recombinant DNA technology through restriction enzyme cutting, sticky-end formation, and DNA ligation.
 
-  **🧬 Genetic Engineering · 🧫 Recombinant DNA · 🧬 Molecular Biology**
+  **🧬 Genetic Engineering · 🧫 Recombinant DNA · 💊 Molecular Biology**
 
   ---
 
