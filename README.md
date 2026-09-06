@@ -1,46 +1,53 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Arc – Genetrix Banner" width="100%">
-  </p>
+  <img src="assets/banner.png" alt="Arc – Genetrix — Interactive Genetic Engineering Simulator" width="100%">
+</p>
 
-  # 🧬 Arc – Genetrix
+# 🧬 Arc – Genetrix
 
-  ### *Interactive Genetic Engineering Simulator*
+### *Interactive Genetic Engineering Simulator*
 
-  > An educational simulation exploring recombinant DNA technology through restriction enzyme cutting, sticky-end formation, and DNA ligation.
+> **Arc – Genetrix** is an interactive visualization exploring **recombinant DNA technology**, restriction enzyme cleavage, sticky-end formation, and DNA ligation.
+>
+> 🧬 **Genetic Engineering** · 🧫 **Recombinant DNA** · 🔬 **Molecular Biology**
 
-  **🧬 Genetic Engineering · 🧫 Recombinant DNA · 💊 Molecular Biology**
+**🔬 [Explore the Simulation](YOUR-LINK-HERE)**
 
-  ---
+---
 
-  ## ✦ Features
+## ✦ Features
 
-  **🧪 Restriction Enzyme Simulation**  
-  Identify restriction sites and simulate DNA cleavage.
+**🧪 Restriction Enzyme Simulation**  
+Identify restriction sites and simulate DNA cleavage.
 
-  **♎ Sticky-End Visualization**  
-  Explore complementary overhang formation through staggered DNA cuts.
+**♎ Sticky-End Visualization**  
+Explore complementary overhangs formed through staggered DNA cuts.
 
-  **🧬 DNA Ligation**  
-  Join compatible DNA fragments to simulate recombinant DNA formation.
+**🧬 DNA Ligation**  
+Join compatible DNA fragments to simulate recombinant DNA formation.
 
-  **🔬 Interactive Learning**  
-  Understand genetic engineering workflows through step-by-step visualization.
+**🔬 Interactive Learning**  
+Explore genetic engineering workflows through step-by-step visualization.
 
-  **🎴 Dark Interface**  
-  A clean, focused environment designed for scientific exploration.
+**🎴 Dark Interface**  
+A clean, focused environment designed for scientific exploration.
 
-  ---
+---
 
-  ## ⚙️ Technology
+## 🧬 Core Concepts
 
-  **HTML · CSS · JavaScript**
+**Restriction Enzymes · DNA Cleavage · Sticky Ends · DNA Ligation · Recombinant DNA · Genetic Engineering**
 
-  **Interface:** Interactive Web Simulation  
-  **Source:** GitHub  
-  **Hosting:** GitHub Pages
+---
 
-  ---
+## ⚙️ Technology
 
-  ## 📜 License
+**HTML · CSS · JavaScript**
 
-  **GNU General Public License v3.0 (GPL-3.0)**
+**Repository:** GitHub & Codeberg  
+**Hosting:** Cloudflare
+
+---
+
+## 📜 License
+
+Distributed under the **GNU General Public License v3.0 (GPL-3.0)**.
