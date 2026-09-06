@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/repository banner.png" alt="Arc – Genetrix Banner" width="100%">
+  <img src="assets/banner.png" alt="Arc – Genetrix Banner" width="100%">
   </p>
 
   # 🧬 Arc – Genetrix
