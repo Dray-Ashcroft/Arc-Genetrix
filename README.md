@@ -8,7 +8,7 @@
 
 > **Arc – Genetrix** is an interactive visualization exploring **recombinant DNA technology**, restriction enzyme cleavage, sticky-end formation, and DNA ligation.
 >
-> 🧬 **Genetic Engineering** · 🧫 **Recombinant DNA** · 🔬 **Molecular Biology**
+🧬 **Genetic Engineering** · 🧫 **Recombinant DNA** · 🔬 **Molecular Biology**
 
 **🔬 [Explore the Simulation](YOUR-LINK-HERE)**
 
